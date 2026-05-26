@@ -1,15 +1,43 @@
-export class LoginError extends Error {
-    constructor(message: string, cause: unknown) {
+export class AppError extends Error {
+    constructor(message: string) {
         super(message);
-        this.name = "LoginError";
-        this.cause = cause;
+        this.name = "AppError";
+        Object.setPrototypeOf(this, AppError.prototype);
+    }
+
+    toJSON() {
+        return {
+            name: this.name,
+            message: this.message,
+            stack: this.stack,
+        };
     }
 }
 
-export class BookError extends Error {
-    constructor(message: string, cause: unknown) {
+export class MethodError extends AppError {
+    constructor(message: string) {
+        super(message);
+        this.name = "MethodError";
+    }
+}
+
+export class LoginError extends AppError {
+    constructor(message: string) {
+        super(message);
+        this.name = "LoginError";
+    }
+}
+
+export class SessionError extends AppError {
+    constructor(message: string) {
+        super(message);
+        this.name = "SessionError";
+    }
+}
+
+export class BookError extends AppError {
+    constructor(message: string) {
         super(message);
         this.name = "BookError";
-        this.cause = cause;
     }
 }
