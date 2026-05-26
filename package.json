@@ -1,26 +1,30 @@
 {
-  "name": "autobooker",
-  "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
-  },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "packageManager": "pnpm@10.15.0",
-  "devDependencies": {
-    "@types/luxon": "^3.7.1",
-    "@types/node": "^25.9.1",
-    "@types/nodemailer": "^8.0.0",
-    "cross-env": "^10.1.0",
-    "typescript": "^6.0.3"
-  },
-  "dependencies": {
-    "dotenv": "^17.4.2",
-    "luxon": "^3.7.2",
-    "nodemailer": "^8.0.8",
-    "typebox": "^1.1.38"
-  }
+    "name": "autobooker",
+    "version": "1.0.0",
+    "description": "Automated Octiv booker",
+    "main": "dist/book.js",
+    "type": "module",
+    "scripts": {
+        "build": "tsc",
+        "dev": "pnpm build && node dist/book.js"
+    },
+    "keywords": [],
+    "author": {
+        "name": "Radostin Romanov"
+    },
+    "license": "ISC",
+    "packageManager": "pnpm@10.15.0",
+    "devDependencies": {
+        "@types/luxon": "^3.7.1",
+        "@types/node": "^25.9.1",
+        "@types/nodemailer": "^8.0.0",
+        "cross-env": "^10.1.0",
+        "typescript": "^6.0.3"
+    },
+    "dependencies": {
+        "dotenv": "^17.4.2",
+        "luxon": "^3.7.2",
+        "nodemailer": "^8.0.8",
+        "typebox": "^1.1.38"
+    }
 }
