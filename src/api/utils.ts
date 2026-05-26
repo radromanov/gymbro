@@ -1,3 +1,4 @@
+import { URLSearchParams } from "url";
 import { loadEnv } from "../config.js";
 import { MethodError } from "../errors.js";
 
@@ -35,6 +36,7 @@ export const hit = async <T>(
     opts?: {
         body?: Record<string, any>;
         headers?: [string, string][];
+        queryparams?: Record<string, string>;
     },
 ): Promise<T> => {
     if (method !== "GET" && method !== "POST" && method !== "PUT") {
@@ -42,16 +44,21 @@ export const hit = async <T>(
     }
 
     const injectHeaders = opts?.headers || [];
-    const injectBody = opts?.body || undefined;
 
     if (method === "GET") {
-        const resp = await fetch(env.API_URL + endpoint, {
+        const injectQueryParams = opts?.queryparams
+            ? "?" + new URLSearchParams(opts.queryparams)
+            : "";
+
+        const resp = await fetch(env.API_URL + endpoint + injectQueryParams, {
             method,
             headers: [...DEFAULT_HEADERS, ...injectHeaders],
         });
         const data = (await resp.json()) as T;
         return data;
     }
+
+    const injectBody = opts?.body || undefined;
 
     const resp = await fetch(env.API_URL + endpoint, {
         method,
@@ -60,4 +67,8 @@ export const hit = async <T>(
     });
     const data = (await resp.json()) as T;
     return data;
+};
+
+export const sleep = (ms: number) => {
+    return new Promise((resolve) => setTimeout(resolve, ms));
 };

@@ -35,6 +35,13 @@ export class SessionError extends AppError {
     }
 }
 
+export class ScheduleError extends AppError {
+    constructor(message: string) {
+        super(message);
+        this.name = "ScheduleError";
+    }
+}
+
 export class BookError extends AppError {
     constructor(message: string) {
         super(message);
