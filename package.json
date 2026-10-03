@@ -6,7 +6,8 @@
     "type": "module",
     "scripts": {
         "build": "tsc",
-        "dev": "pnpm build && node dist/index.js"
+        "dev": "pnpm build && node dist/index.js",
+        "book": "npm build && node dist/test-script.js"
     },
     "keywords": [],
     "author": {
