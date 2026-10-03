@@ -34,6 +34,10 @@ export interface IBookResponse {
     };
 }
 
+export interface IBookResponseTaken {
+    message: string;
+}
+
 export interface IClass {
     id: number;
     limit: number;

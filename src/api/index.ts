@@ -8,6 +8,6 @@ export const API = {
     Sleep: sleep,
     Login: login,
     GetMe: me,
-    GetDate: schedule,
+    GetSchedule: schedule,
     Book: book,
 };

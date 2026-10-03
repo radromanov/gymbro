@@ -1,5 +1,6 @@
 import { API } from "./api/index.js";
 import { AppError } from "./errors.js";
+import { sleep } from "./api/utils.js";
 
 /**
  * We will assume that the next 13 days are booked accordingly
@@ -18,6 +19,7 @@ import { AppError } from "./errors.js";
  *
  * If sessions <= 6, send email notification on each successful booking to alert me.
  *
+ * (Below might be a separate script/runner)
  * If our package needs "topping up" for TOMORROW's bookings, alert me via email.
  *  - To find that our, at 00:00:00 each day, attempt to book one session
  *    If not possible, send me email notification
@@ -25,26 +27,19 @@ import { AppError } from "./errors.js";
 
 async function main() {
     const user = await API.Login();
-    // const me = await API.GetMe(user.accessToken);
+    const me = await API.GetMe(user.accessToken);
+    const schedule = await API.GetSchedule(user.accessToken);
 
-    // Index 36 and 37 are safe to obtain always -- no need to loop over
-    // const schedule = await API.GetDate(user.accessToken, "2026-05-27");
-
-    // const sessionOne = schedule.data[36];
-    // const sessionTwo = schedule.data[37];
-
-    // // Pseudo logic
-    // const targetTime = 19:00:00
-    // const currentTime = Date.now();
-    // const delta = targetTime - currentTime;
-    // await API.Sleep(delta);
-    // await API.Book(sessionOne);
-
-    // const targetTime2 = 19:30:00;
-    // const currentTime2 = Date.now();
-    // const delta2 = targetTime2 - currentTime2;
-    // await API.Sleep(delta2);
-    // await API.Book(sessionTwo);
+    // Sessions 36 and 37 are safe to obtain always -- no need to loop over
+    // Those are our target sessions
+    const sessionOne = schedule.data[36];
+    const sessionTwo = schedule.data[37];
+    await API.Book(user.accessToken, sessionOne.id, me.id);
+    // 1 min = 60000ms
+    // Session intervals = 30 minutes
+    // 60000ms * 30 = 30 minutes in ms
+    await sleep(60000 * 30);
+    await API.Book(user.accessToken, sessionTwo.id, me.id);
 }
 
 main()
