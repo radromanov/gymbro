@@ -1,0 +1,9 @@
+name: Session One Script
+on: [push]
+jobs:
+    Book-Session-One:
+         runs-on: ubuntu-latest
+         steps:
+              - run: echo "default job"
+              - name: Booking session one at 18:00
+                uses: actions/checkout@v2
