@@ -3,6 +3,7 @@ import { AppError } from "./errors.js";
 async function test() {
     console.log("I have been ran");
     console.log("Incoming arguments:", process.argv);
+    console.log("Env:", process.env);
 }
 
 test()
