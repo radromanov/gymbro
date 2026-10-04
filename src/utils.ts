@@ -31,6 +31,7 @@ const DEFAULT_HEADERS: readonly [string, string][] = [
     // ["Content-Length", "83"],
 ];
 
+export const NEXT_SLOT_DAYS = 14;
 export const TIME_ZONE = "Europe/Sofia";
 
 const env = loadEnv();
@@ -78,13 +79,13 @@ export const sleep = (ms: number) => {
     return new Promise((resolve) => setTimeout(resolve, ms));
 };
 
-export const getTomorrow = (): string => {
-    const tomorrow = new Date();
-    tomorrow.setDate(tomorrow.getDate() + 1);
+export const getNextBookingDate = (): string => {
+    const next = new Date();
+    next.setDate(next.getDate() + NEXT_SLOT_DAYS);
 
-    const day = String(tomorrow.getDate()).padStart(2, "0");
-    const month = String(tomorrow.getMonth() + 1).padStart(2, "0");
-    const year = tomorrow.getFullYear();
+    const day = String(next.getDate()).padStart(2, "0");
+    const month = String(next.getMonth() + 1).padStart(2, "0");
+    const year = next.getFullYear();
 
     return `${day}-${month}-${year}`;
 };
@@ -125,7 +126,7 @@ export const processFileLineByLine = async (filepath: string, callback: (s: stri
 
 
     for await (const line of rl) {
-        if (line[0] === "#" || line === "") {
+        if (line.includes("#") || line === "") {
             continue;
         }
         const cleaned = line.trim();

@@ -1,7 +1,7 @@
 import { DateTime } from "luxon";
 import { ScheduleError } from "../errors.js";
 import { ISchedule } from "./interfaces.js";
-import { hit, sleep } from "../utils.js";
+import { hit, NEXT_SLOT_DAYS, sleep, TIME_ZONE } from "../utils.js";
 import { loadEnv } from "../config.js";
 
 const env = loadEnv();
@@ -10,8 +10,8 @@ export const schedule = async (accessToken: string) => {
     console.log("Attempting to get schedule...");
     try {
         const tomorrow = DateTime.now()
-            .plus({ day: 1 })
-            .setZone("Europe/Sofia")
+            .plus({ day: NEXT_SLOT_DAYS })
+            .setZone(TIME_ZONE)
             .toISODate();
 
         const data = await hit<ISchedule>("/class-dates", "GET", {

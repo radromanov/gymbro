@@ -1,7 +1,7 @@
 import { DateTime } from "luxon";
 import { API } from "./api/index.js";
-import { AppError } from "./errors.js";
-import { getTimeInMs, getTomorrow, processFileLineByLine, sleep, TIME_ZONE } from "./utils.js";
+import { AppError, SessionError } from "./errors.js";
+import { getTimeInMs, getNextBookingDate, processFileLineByLine, sleep, TIME_ZONE } from "./utils.js";
 
 /**
  * We will assume that the next 13 days are booked accordingly
@@ -25,7 +25,7 @@ import { getTimeInMs, getTomorrow, processFileLineByLine, sleep, TIME_ZONE } fro
 async function main() {
     // Load `skip-dates.txt` first
     // If TOMORROW is in `skip-dates.txt`, abort
-    const tomorrow = getTomorrow();
+    const tomorrow = getNextBookingDate();
     const skip = await processFileLineByLine("./skip-dates.txt", (s) => s === tomorrow);
     if (skip) {
         console.log(`Tomorrow's date (${tomorrow}) is part of the "skip-dates.txt" file; aborting process...`)
@@ -41,36 +41,25 @@ async function main() {
     const user = await API.Login();
     const me = await API.GetMe(user.accessToken);
     const schedule = await API.GetSchedule(user.accessToken);
+
+    const session = schedule.data.find((s) => s.startTime.includes(timeSlot));
+    if (!session) {
+        throw new SessionError(`session for time ${timeSlot} not found`);
+    }
     
     const nowInMs = DateTime.now().setZone(TIME_ZONE).toMillis();
     const targetTimeInMs = getTimeInMs(timeSlot);
     const diff = targetTimeInMs - nowInMs;
-    if (diff < 0) {
-        // Attempt to book immediately
-        console.log("attempting to book immediately");
-        return;
+
+    if (diff > 0) {
+        console.log("sleeping the difference first");
+        await sleep(diff);
     }
 
-    console.log("sleeping the difference first");
-    await sleep(diff);
-    // Book here
     console.log("attempting to book");
 
-    // Then, `sleep(targetTimeInMs - currentTimeInMs)` - sleep until our target time
-    // Once `sleep(...)` finishes, book and finish job
-    //
-    // This script will book ONE session only, so we will receive the session via CLI args passed by the GitHub action?
-
-    // Sessions 36 and 37 are safe to obtain always -- no need to loop over
-    // Those are our target sessions
-    // const sessionOne = schedule.data[36];
-    // const sessionTwo = schedule.data[37];
-    // await API.Book(user.accessToken, sessionOne.id, me.id);
-    // 1 min = 60000ms
-    // Session intervals = 30 minutes
-    // 60000ms * 30 = 30 minutes in ms
-    // await sleep(60000 * 30);
-    // await API.Book(user.accessToken, sessionTwo.id, me.id);
+    // Book here
+    await API.Book(user.accessToken, session.id, me.id);
 }
 
 main()

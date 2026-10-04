@@ -1,7 +1,7 @@
-name: Booking a session on Octiv (18:00)
+name: Booking a session on Octiv (18:30)
 on:
   schedule:
-    - cron: "55 15 * * 1-5" # UTC is 3 hours behind Europe/Sofia
+    - cron: "25 16 * * 1-5" # UTC is 3 hours behind Europe/Sofia; Check with Summer/Winter solstice
   workflow_dispatch: # Allow manual execution
 jobs:
   Book-Session-One:
@@ -27,4 +27,4 @@ jobs:
         run: npm ci
 
       - name: Book Session via script
-        run: npm run book -- time=19:00 # Summer Solstice is 19:00; Winter Solstice is 18:00
+        run: npm run book -- time=19:30 # Summer Solstice is 19:30; Winter Solstice is 18:30
