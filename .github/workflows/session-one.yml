@@ -27,4 +27,4 @@ jobs:
         run: npm ci
 
       - name: Book Session via script
-        run: npm run book -- --param1=testParam
+        run: npm run book -- time=10:55 # Summer Solstice is 19:00; Winter Solstice is 18:00

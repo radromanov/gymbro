@@ -32,6 +32,10 @@ async function main() {
         return;
     }
 
+    // Expects: npm run dev -- time={HH:MM}
+    const [timeSlotRaw] = process.argv.slice(2);
+    const timeSlot = timeSlotRaw.split("=")[1];
+
     // CRON job will have to install dependencies - it starts 5 minutes early
     // Once this script runs, login and get schedule
     const user = await API.Login();
@@ -39,7 +43,7 @@ async function main() {
     const schedule = await API.GetSchedule(user.accessToken);
     
     const nowInMs = DateTime.now().setZone(TIME_ZONE).toMillis();
-    const targetTimeInMs = getTimeInMs("18:00");
+    const targetTimeInMs = getTimeInMs(timeSlot);
     const diff = targetTimeInMs - nowInMs;
     if (diff < 0) {
         // Attempt to book immediately
