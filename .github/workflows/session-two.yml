@@ -36,4 +36,4 @@ jobs:
         run: npm ci
 
       - name: Book Session via script
-        run: npm run book -- time=$TIME_SLOT # Summer Solstice is 19:30; Winter Solstice is 18:30
+        run: npm run book # Summer Solstice is 19:30; Winter Solstice is 18:30

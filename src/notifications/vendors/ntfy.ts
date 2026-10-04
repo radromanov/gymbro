@@ -13,7 +13,7 @@ export class NtfyVendor extends Vendor {
             {
                 method: "POST",
                 headers: {
-                    Title: title,
+                    Title: "GymBro | " + title,
                     Priority: "high",
                 },
                 body: message,

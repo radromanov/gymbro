@@ -1,28 +1,9 @@
 import { DateTime } from "luxon";
 import { API } from "./api/index.js";
-import { AppError, SessionError } from "./errors.js";
-import { getTimeInMs, getNextBookingDate, processFileLineByLine, sleep, TIME_ZONE } from "./utils.js";
+import { AppError } from "./errors.js";
+import { getTimeInMs, getNextBookingDate, processFileLineByLine, sleep, TIME_ZONE, getSession } from "./utils.js";
 import { NtfyVendor } from "./notifications/vendors/ntfy.js";
 import { loadEnv } from "./config.js";
-
-/**
- * We will assume that the next 13 days are booked accordingly
- * and that we only need to book TODAY's sessions.
- *
- * This program needs to run at 18:55 so we ensure the pre-booking sequence (Login, Me, and GetDate) completes.
- *
- * Once the pre-booking sequence is complete,
- * it waits until 19:00 Europe/Sofia (Summer-time) / 18:00 Europe/Sofia (Winter-time),
- * proceeds to fire the first booking request.
- *
- * If the session doesn't book successfully (e.g., slot full, package has no sessions),
- * proceed to send email notification with summary of attempt (date, slot, etc.).
- *
- * (Below might be a separate script/runner)
- * If our package needs "topping up" for TOMORROW's bookings, alert me via email.
- *  - To find that our, at 03:00:00 each day, attempt to book one session
- *    If not possible, send me email notification
- */
 
 const env = loadEnv();
 
@@ -40,25 +21,35 @@ async function main() {
     // Once this script runs, login and get schedule
     const user = await API.Login();
     const me = await API.GetMe(user.accessToken);
+
     const schedule = await API.GetSchedule(user.accessToken);
+    const session = getSession(schedule);
 
-    const session = schedule.data.find((s) => s.startTime.includes(env.TIME_SLOT));
-    if (!session) {
-        throw new SessionError(`session for time ${env.TIME_SLOT} not found`);
-    }
-    
-    const notificationService = new NtfyVendor();
-    const nowInMs = DateTime.now().setZone(TIME_ZONE).toMillis();
+    // Determine if we need to wait until the provided `env.TIME_SLOT`
     const targetTimeInMs = getTimeInMs(env.TIME_SLOT);
+    const nowInMs = DateTime.now().setZone(TIME_ZONE).toMillis();
     const diff = targetTimeInMs - nowInMs;
-
     if (diff > 0) {
         console.log(`Waiting ${diff}ms before slot opens up...`);
         await sleep(diff);
     }
-
+    
     // Book here
-    await API.Book(user.accessToken, session, me.id, notificationService);
+    const bookData = await API.Book(user.accessToken, session, me.id);
+    
+    // Notifications
+    const notif = new NtfyVendor();
+    if ("message" in bookData) {
+        await notif.send(
+            "Session Not Booked",
+            `Automated booking for ${session.date}, ${session.startTime} failed.\n\n${bookData.message}`,
+        );
+    } else {
+        await notif.send(
+            "Session Booked",
+            `You have successfully booked your session for ${session.date}, ${session.startTime}.\n\nHappy lifting!`
+        );
+    }
 }
 
 main()

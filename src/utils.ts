@@ -4,6 +4,7 @@ import { URLSearchParams } from "url";
 import { loadEnv } from "./config.js";
 import { AppError, MethodError } from "./errors.js";
 import { DateTime } from "luxon";
+import { ISchedule } from "./api/interfaces.js";
 
 const DEFAULT_HEADERS: readonly [string, string][] = [
     ["Accept", "application/json, text/plain, */*"],
@@ -136,4 +137,16 @@ export const processFileLineByLine = async (filepath: string, callback: (s: stri
         }
     }
     return false;
+}
+
+export const getSession = (schedule: ISchedule, timeSlot = env.TIME_SLOT) => {
+    // Calculate the session index instead of searching for the session
+    const [hour, minute] = timeSlot.split(":").map(Number);
+
+    let idx = hour * 2;
+    if (minute !== 0) {
+        idx += 1; // move the idx by 1 to get the `*:30` session
+    }
+    
+    return schedule.data[idx];
 }
