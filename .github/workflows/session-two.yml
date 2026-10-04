@@ -21,7 +21,7 @@ jobs:
       LOCATION_ID: ${{ secrets.LOCATION_ID }}
       NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
 
-      TIME_SLOT: ${{ github.event_name == "workflow_dispatch" && inputs.timeSlot || "19:30" }}
+      TIME_SLOT: ${{ github.event_name == 'workflow_dispatch' && inputs.timeSlot || '19:30' }}
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
