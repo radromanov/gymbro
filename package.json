@@ -1,7 +1,7 @@
 {
     "name": "gymbro",
     "version": "1.0.0",
-    "description": "",
+    "description": "Lightweight automated booking service, handling bookings on Octiv, with push notifications.",
     "main": "dist/index.js",
     "type": "module",
     "scripts": {
