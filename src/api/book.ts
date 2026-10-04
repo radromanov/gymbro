@@ -1,15 +1,17 @@
 import { BookError } from "../errors.js";
-import { IBookResponse, IBookResponseTaken } from "./interfaces.js";
+import { IBookResponse, IBookResponseTaken, ISlot } from "./interfaces.js";
 import { hit } from "../utils.js";
+import { IVendor } from "../notifications/vendor.js";
 
 export const book = async (
     accessToken: string,
-    classDateId: number,
+    session: ISlot,
     userId: number,
+    notificationService: IVendor,
 ) => {
     try {
         console.log(
-            `Attempting to book classDateId=${classDateId} as userId=${userId}...`,
+            `Attempting to book classDateId=${session.id} as userId=${userId}...`,
         );
         const data = await hit<IBookResponse | IBookResponseTaken>(
             "/class-bookings",
@@ -17,7 +19,7 @@ export const book = async (
             {
                 headers: [["Authorization", `Bearer ${accessToken}`]],
                 body: {
-                    classDateId,
+                    classDateId: session.id,
                     userId,
                 },
             },
@@ -25,9 +27,18 @@ export const book = async (
 
         if ("message" in data) {
             // send notification -- attach data.message
+            notificationService.send(
+                "GymBro Booking (Fail)",
+                `Attempted booking failed for session on ${session.date}.\n\nFail message: ${data.message}.`
+            );
+        } else {
+            notificationService.send(
+                "GymBro Booking (Success)",
+                `Attempted booking for session on ${session.date} successful.`
+            );
         }
     } catch (e) {
         console.log(e);
-        throw new BookError(`unable to book classDateId=${classDateId}`);
+        throw new BookError(`unable to book classDateId=${session.id}`);
     }
 };

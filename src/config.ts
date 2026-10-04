@@ -8,12 +8,16 @@ const EnvSchema = Type.Object({
     MYGYM_PASS: Type.String(),
     TENANT_ID: Type.String(),
     LOCATION_ID: Type.String(),
+    NTFY_TOPIC: Type.String(),
+    TIME_SLOT: Type.String(),
 });
 
 const EnvCompiler = Schema.Compile(EnvSchema);
 
-export type Env = ReturnType<typeof EnvCompiler.Parse>;
-
-export function loadEnv(): Env {
-    return EnvCompiler.Parse(process.env);
+export function loadEnv() {
+    const env = EnvCompiler.Parse(process.env);
+    return {
+        // Can parse numbers/booleans here
+        ...env,
+    }
 }

@@ -2,6 +2,8 @@ import { DateTime } from "luxon";
 import { API } from "./api/index.js";
 import { AppError, SessionError } from "./errors.js";
 import { getTimeInMs, getNextBookingDate, processFileLineByLine, sleep, TIME_ZONE } from "./utils.js";
+import { NtfyVendor } from "./notifications/vendors/ntfy.js";
+import { loadEnv } from "./config.js";
 
 /**
  * We will assume that the next 13 days are booked accordingly
@@ -22,6 +24,8 @@ import { getTimeInMs, getNextBookingDate, processFileLineByLine, sleep, TIME_ZON
  *    If not possible, send me email notification
  */
 
+const env = loadEnv();
+
 async function main() {
     // Load `skip-dates.txt` first
     // If NEXT is in `skip-dates.txt`, abort
@@ -32,23 +36,20 @@ async function main() {
         return;
     }
 
-    // Expects: npm run dev -- time={HH:MM}
-    const [timeSlotRaw] = process.argv.slice(2);
-    const timeSlot = timeSlotRaw.split("=")[1];
-
     // CRON job will have to install dependencies - it starts 5 minutes early
     // Once this script runs, login and get schedule
     const user = await API.Login();
     const me = await API.GetMe(user.accessToken);
     const schedule = await API.GetSchedule(user.accessToken);
 
-    const session = schedule.data.find((s) => s.startTime.includes(timeSlot));
+    const session = schedule.data.find((s) => s.startTime.includes(env.TIME_SLOT));
     if (!session) {
-        throw new SessionError(`session for time ${timeSlot} not found`);
+        throw new SessionError(`session for time ${env.TIME_SLOT} not found`);
     }
     
+    const notificationService = new NtfyVendor();
     const nowInMs = DateTime.now().setZone(TIME_ZONE).toMillis();
-    const targetTimeInMs = getTimeInMs(timeSlot);
+    const targetTimeInMs = getTimeInMs(env.TIME_SLOT);
     const diff = targetTimeInMs - nowInMs;
 
     if (diff > 0) {
@@ -59,7 +60,7 @@ async function main() {
     console.log("attempting to book");
 
     // Book here
-    await API.Book(user.accessToken, session.id, me.id);
+    await API.Book(user.accessToken, session, me.id, notificationService);
 }
 
 main()
