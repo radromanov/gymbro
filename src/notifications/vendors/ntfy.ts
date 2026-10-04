@@ -24,8 +24,5 @@ export class NtfyVendor extends Vendor {
         if (!resp.ok) {
             throw new VendorError(`notification failed: ${resp.status}`, this.name);
         }
-
-        console.log("Notification over Ntfy sent successfully")
-        return;
     }
 }
