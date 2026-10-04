@@ -1,3 +1,5 @@
+import { Vendors } from "./notifications/vendor.js";
+
 export class AppError extends Error {
     constructor(message: string) {
         super(message);
@@ -46,5 +48,12 @@ export class BookError extends AppError {
     constructor(message: string) {
         super(message);
         this.name = "BookError";
+    }
+}
+
+export class VendorError extends AppError {
+    constructor(message: string, vendor: Vendors) {
+        super(message);
+        this.name = Vendors[vendor] + "VendorError"
     }
 }
