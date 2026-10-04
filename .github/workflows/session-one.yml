@@ -8,7 +8,7 @@ on:
         type: string
         description: Time slot to book (exact 30 minute intervals)
         required: true
-        default: "19:00" # Summer Solstice is 19:00; Winter Solstice is 18:00
+        default: "19:00" # Summer Time is 19:00; Winter Time is 18:00
 jobs:
   Book-Session-One:
     runs-on: ubuntu-latest
@@ -36,4 +36,4 @@ jobs:
         run: npm ci
 
       - name: Book Session via script
-        run: npm run book # Summer Solstice is 19:00; Winter Solstice is 18:00
+        run: npm run book # Summer Time is 19:00; Winter Time is 18:00
