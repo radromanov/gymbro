@@ -27,12 +27,12 @@ export const book = async (
 
         if ("message" in data) {
             // send notification -- attach data.message
-            notificationService.send(
+            await notificationService.send(
                 "GymBro Booking (Fail)",
                 `Attempted booking failed for session on ${session.date}.\n\nFail message: ${data.message}.`
             );
         } else {
-            notificationService.send(
+            await notificationService.send(
                 "GymBro Booking (Success)",
                 `Attempted booking for session on ${session.date} successful.`
             );

@@ -53,11 +53,9 @@ async function main() {
     const diff = targetTimeInMs - nowInMs;
 
     if (diff > 0) {
-        console.log("sleeping the difference first");
+        console.log(`Waiting ${diff}ms before slot opens up...`);
         await sleep(diff);
     }
-
-    console.log("attempting to book");
 
     // Book here
     await API.Book(user.accessToken, session, me.id, notificationService);
