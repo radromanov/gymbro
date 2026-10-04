@@ -6,6 +6,7 @@ on:
 jobs:
   Book-Session-One:
     runs-on: ubuntu-latest
+    environment: gymbro secrets
     env:
       API_URL: ${{ vars.API_URL }}
       MYGYM_EMAIL: ${{ secrets.MYGYM_EMAIL }}
