@@ -24,11 +24,11 @@ import { getTimeInMs, getNextBookingDate, processFileLineByLine, sleep, TIME_ZON
 
 async function main() {
     // Load `skip-dates.txt` first
-    // If TOMORROW is in `skip-dates.txt`, abort
-    const tomorrow = getNextBookingDate();
-    const skip = await processFileLineByLine("./skip-dates.txt", (s) => s === tomorrow);
+    // If NEXT is in `skip-dates.txt`, abort
+    const next = getNextBookingDate();
+    const skip = await processFileLineByLine("./skip-dates.txt", (s) => s === next);
     if (skip) {
-        console.log(`Tomorrow's date (${tomorrow}) is part of the "skip-dates.txt" file; aborting process...`)
+        console.log(`Next date (${next}) is part of the "skip-dates.txt" file; aborting process...`)
         return;
     }
 
