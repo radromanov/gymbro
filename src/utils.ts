@@ -1,6 +1,9 @@
+import fs from "fs";
+import readline from "readline";
 import { URLSearchParams } from "url";
-import { loadEnv } from "../config.js";
-import { MethodError } from "../errors.js";
+import { loadEnv } from "./config.js";
+import { AppError, MethodError } from "./errors.js";
+import { DateTime } from "luxon";
 
 const DEFAULT_HEADERS: readonly [string, string][] = [
     ["Accept", "application/json, text/plain, */*"],
@@ -27,6 +30,8 @@ const DEFAULT_HEADERS: readonly [string, string][] = [
     ["X-Camelcase", "true"],
     // ["Content-Length", "83"],
 ];
+
+export const TIME_ZONE = "Europe/Sofia";
 
 const env = loadEnv();
 
@@ -72,3 +77,62 @@ export const hit = async <T>(
 export const sleep = (ms: number) => {
     return new Promise((resolve) => setTimeout(resolve, ms));
 };
+
+export const getTomorrow = (): string => {
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+
+    const day = String(tomorrow.getDate()).padStart(2, "0");
+    const month = String(tomorrow.getMonth() + 1).padStart(2, "0");
+    const year = tomorrow.getFullYear();
+
+    return `${day}-${month}-${year}`;
+};
+
+/**
+ * @param time HH:MM format.
+ * @returns `time` in milliseconds (today).
+ */
+export const getTimeInMs = (time: string) => {
+    const match = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(time);
+    if (!match) {
+        throw new AppError(`invalid time format in getTimeInMs: ${time}. Must be in HH:MM format.`)
+    }
+    const [, hour, minute] = match;
+    const target = DateTime.now()
+        .setZone(TIME_ZONE)
+        .set({
+            hour: Number(hour),
+            minute: Number(minute),
+            second: 0,
+            millisecond: 0,
+        });
+    return target.toMillis();
+}
+
+/**
+ * 
+ * @param filepath Path relative to project root.
+ * @param callback Filtering function. If result is `true`, this function returns `true`.
+ * @returns Boolean. `true` is `callback(s)` is satisfied; `false` otherwise.
+ */
+export const processFileLineByLine = async (filepath: string, callback: (s: string) => boolean) => {
+    const fileStream = fs.createReadStream(filepath);
+    const rl = readline.createInterface({
+        input: fileStream,
+        crlfDelay: Infinity,
+    });
+
+
+    for await (const line of rl) {
+        if (line[0] === "#" || line === "") {
+            continue;
+        }
+        const cleaned = line.trim();
+
+        if (callback(cleaned)) {
+            return true;
+        }
+    }
+    return false;
+}

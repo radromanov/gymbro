@@ -1,6 +1,6 @@
 import { SessionError } from "../errors.js";
 import { IMeResponse } from "./interfaces.js";
-import { hit, sleep } from "./utils.js";
+import { hit, sleep } from "../utils.js";
 
 export const me = async (accessToken: string) => {
     console.log("Attempting me...");

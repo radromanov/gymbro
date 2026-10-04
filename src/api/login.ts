@@ -1,7 +1,7 @@
 import { loadEnv } from "../config.js";
 import { LoginError } from "../errors.js";
 import { ILoginResponse } from "./interfaces.js";
-import { hit, sleep } from "./utils.js";
+import { hit, sleep } from "../utils.js";
 
 const env = loadEnv();
 

@@ -1,6 +1,6 @@
 import { BookError } from "../errors.js";
 import { IBookResponse, IBookResponseTaken } from "./interfaces.js";
-import { hit } from "./utils.js";
+import { hit } from "../utils.js";
 
 export const book = async (
     accessToken: string,

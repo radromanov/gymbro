@@ -1,0 +1,6 @@
+# Lines starting with "#" are treated as comments
+# Any date in this list gets skipped (the program will not book it)
+# Dates must be in dd-MM-yyyy format
+
+04-10-2026
+05-10-2026

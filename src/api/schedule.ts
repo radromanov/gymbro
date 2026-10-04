@@ -1,7 +1,7 @@
 import { DateTime } from "luxon";
 import { ScheduleError } from "../errors.js";
 import { ISchedule } from "./interfaces.js";
-import { hit, sleep } from "./utils.js";
+import { hit, sleep } from "../utils.js";
 import { loadEnv } from "../config.js";
 
 const env = loadEnv();
