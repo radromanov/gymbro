@@ -13,6 +13,7 @@ jobs:
       MYGYM_PASS: ${{ secrets.MYGYM_PASS }}
       TENANT_ID: ${{ secrets.TENANT_ID }}
       LOCATION_ID: ${{ secrets.LOCATION_ID }}
+      NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
