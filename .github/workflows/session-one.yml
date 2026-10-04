@@ -3,6 +3,12 @@ on:
   schedule:
     - cron: "55 15 * * 1-5" # UTC is 3 hours behind Europe/Sofia
   workflow_dispatch: # Allow manual execution
+    inputs:
+      timeSlot:
+        type: string
+        description: Time slot to book (exact 30 minute intervals)
+        required: true
+        default: "19:00" # Summer Solstice is 19:00; Winter Solstice is 18:00
 jobs:
   Book-Session-One:
     runs-on: ubuntu-latest
@@ -14,6 +20,8 @@ jobs:
       TENANT_ID: ${{ secrets.TENANT_ID }}
       LOCATION_ID: ${{ secrets.LOCATION_ID }}
       NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+
+      TIME_SLOT: ${{ github.event_name == "workflow_dispatch" && inputs.timeSlot || "19:00" }}
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -28,4 +36,4 @@ jobs:
         run: npm ci
 
       - name: Book Session via script
-        run: npm run book -- time=19:00 # Summer Solstice is 19:00; Winter Solstice is 18:00
+        run: npm run book -- time=$TIME_SLOT # Summer Solstice is 19:00; Winter Solstice is 18:00
