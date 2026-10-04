@@ -6,11 +6,6 @@ on:
 jobs:
   Book-Session-One:
     runs-on: ubuntu-latest
-    secrets:
-      MYGYM_EMAIL: ${{ secrets.MYGYM_EMAIL }}
-      MYGYM_PASS: ${{ secrets.MYGYM_PASS }}
-      TENANT_ID: ${{ secrets.TENANT_ID }}
-      LOCATION_ID: ${{ secrets.LOCATION_ID }}
     env:
       API_URL: ${{ vars.API_URL }}
       MYGYM_EMAIL: ${{ secrets.MYGYM_EMAIL }}
