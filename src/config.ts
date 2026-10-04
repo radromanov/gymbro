@@ -9,7 +9,9 @@ const EnvSchema = Type.Object({
     TENANT_ID: Type.String(),
     LOCATION_ID: Type.String(),
     NTFY_TOPIC: Type.String(),
-    TIME_SLOT: Type.String(),
+    TIME_SLOT: Type.String({
+        pattern: "^(?:[01][0-9]|2[0-3]):(?:00|30)$",
+    }),
 });
 
 const EnvCompiler = Schema.Compile(EnvSchema);
