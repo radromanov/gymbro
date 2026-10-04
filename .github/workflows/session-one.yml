@@ -1,29 +1,29 @@
 name: Booking a session on Octiv (18:00)
 on:
-    schedule:
-      - cron: "55 15 * * 1-5" # UTC is 3 hours behind Europe/Sofia
-    workflow_dispatch: # Allow manual execution
+  schedule:
+    - cron: "55 15 * * 1-5" # UTC is 3 hours behind Europe/Sofia
+  workflow_dispatch: # Allow manual execution
 jobs:
-    Book-Session-One:
-         runs-on: ubuntu-latest
-         env:
-             API_URL: ${{ vars.API_URL }}
-             MYGYM_EMAIL: ${{ secrets.MYGYM_EMAIL }}
-             MYGYM_PASS: ${{ secrets.MYGYM_PASS }}
-             TENANT_ID: ${{ secrets.TENANT_ID }}
-             LOCALTION_ID: ${{ secrets.LOCATION_ID }}
-         steps:
-              - name: Checkout Repository
-                uses: actions/checkout@v4
+  Book-Session-One:
+    runs-on: ubuntu-latest
+    env:
+      API_URL: ${{ vars.API_URL }}
+      MYGYM_EMAIL: ${{ secrets.MYGYM_EMAIL }}
+      MYGYM_PASS: ${{ secrets.MYGYM_PASS }}
+      TENANT_ID: ${{ secrets.TENANT_ID }}
+      LOCATION_ID: ${{ secrets.LOCATION_ID }}
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
 
-              - name: Setup Node.js
-                uses: actions/setup-node@v4
-                with:
-                    node-version: 24.16.0
-                    cache: npm
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.16.0
+          cache: npm
 
-              - name: Install Dependencies
-                run: npm ci
+      - name: Install Dependencies
+        run: npm ci
 
-              - name: Book Session via script
-                run: npm run book -- --param1=testParam
+      - name: Book Session via script
+        run: npm run book -- --param1=testParam

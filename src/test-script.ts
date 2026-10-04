@@ -1,5 +1,7 @@
+import { loadEnv } from "./config.js";
 import { AppError } from "./errors.js";
 
+loadEnv();
 async function test() {
     console.log("I have been ran");
     console.log("Incoming arguments:", process.argv);
