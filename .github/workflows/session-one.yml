@@ -1,7 +1,8 @@
 name: Booking a session on Octiv (18:00)
 on:
   schedule:
-    - cron: "55 15 * * 1-5" # UTC is 3 hours behind Europe/Sofia
+    - cron: "55 18 * * 1-5"
+      timezone: "Europe/Sofia"
   workflow_dispatch: # Allow manual execution
     inputs:
       timeSlot:
