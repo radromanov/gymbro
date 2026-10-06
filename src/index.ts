@@ -3,11 +3,13 @@ import { API } from "./api/index.js";
 import { AppError } from "./errors.js";
 import { getTimeInMs, getNextBookingDate, processFileLineByLine, sleep, TIME_ZONE, getSession } from "./utils.js";
 import { NtfyVendor } from "./notifications/vendors/ntfy.js";
-import { loadEnv } from "./config.js";
 
-const env = loadEnv();
+const WINTER_SLOTS = ["18:00", "18:30"] as const;
+const SUMMER_SLOTS = ["19:00", "19:30"] as const;
+const PREPARE_AHEAD_MS = 5 * 60 * 1000;
+const notif = new NtfyVendor();
 
-async function main() {
+async function bookSlot(timeSlot: string) {
     // Load `skip-dates.txt` first
     // If NEXT is in `skip-dates.txt`, abort
     const next = getNextBookingDate();
@@ -25,20 +27,32 @@ async function main() {
     const schedule = await API.GetSchedule(user.accessToken);
     const session = getSession(schedule);
 
-    // Determine if we need to wait until the provided `env.TIME_SLOT`
-    const targetTimeInMs = getTimeInMs(env.TIME_SLOT);
+    // Determine if we need to wait until the provided `timeSlot`
+    const targetTimeInMs = getTimeInMs(timeSlot);
     const nowInMs = DateTime.now().setZone(TIME_ZONE).toMillis();
+    
     const diff = targetTimeInMs - nowInMs;
+    if (diff < 0) {
+        throw new AppError(
+            `Missed booking window for ${timeSlot} by ${Math.abs(diff)}ms`
+        );
+    }
+
     if (diff > 0) {
         console.log(`Waiting ${diff}ms before slot opens up...`);
         await sleep(diff);
     }
+
+    console.log(
+        `Booking ${timeSlot} at ${DateTime.now()
+            .setZone(TIME_ZONE)
+            .toFormat("yyyy-MM-dd HH:mm:ss.SSS ZZZZ")}`,
+    );
     
     // Book here
     const bookData = await API.Book(user.accessToken, session, me.id);
     
     // Notifications
-    const notif = new NtfyVendor();
     if ("message" in bookData) {
         await notif.send(
             "Session Not Booked",
@@ -52,17 +66,126 @@ async function main() {
     }
 }
 
-main()
-    .then(() => {
-        console.log("success");
-        process.exit(0);
-    })
-    .catch((e) => {
-        if (e instanceof AppError) {
-            console.log(e.name, e.toJSON());
-        } else {
-            console.log(e);
-            console.log("unknown error");
+async function scheduler() {
+    console.log(`Scheduler started. Time zone ${TIME_ZONE}.`);
+
+    while (true) {
+        let now = DateTime.now().setZone(TIME_ZONE);
+
+        // Saturday/Sunday
+        if (now.weekday > 5) {
+            const daysUntilMonday = 8 - now.weekday;
+
+            const nextMonday = now
+                .plus({ days: daysUntilMonday })
+                .startOf("day");
+
+            const waitMs = nextMonday.toMillis() - now.toMillis();
+
+            console.log(
+                `Weekend. Sleeping until ${nextMonday.toFormat(
+                    "yyyy-MM-dd HH:mm:ss ZZZZ",
+                )}`,
+            );
+
+            await sleep(waitMs);
+            continue;
         }
-        process.exit(1);
-    });
+
+        const slotsToBook = now.isInDST
+            ? SUMMER_SLOTS
+            : WINTER_SLOTS;
+
+        for (const slot of slotsToBook) {
+            // Recalculate the current time before every slot.
+            now = DateTime.now().setZone(TIME_ZONE);
+
+            const [hour, minute] = slot.split(":").map(Number);
+
+            const target = now.startOf("day").set({
+                hour,
+                minute,
+                second: 0,
+                millisecond: 0,
+            });
+
+            // This slot has already passed.
+            if (target <= now) {
+                continue;
+            }
+
+            const prepareAt = target.minus({
+                milliseconds: PREPARE_AHEAD_MS,
+            });
+
+            const waitMs = prepareAt.toMillis() - now.toMillis();
+
+            console.log(
+                `Next booking: ${target.toFormat(
+                    "yyyy-MM-dd HH:mm:ss.SSS ZZZZ",
+                )}`,
+            );
+
+            console.log(
+                `Preparing at: ${prepareAt.toFormat(
+                    "yyyy-MM-dd HH:mm:ss.SSS ZZZZ",
+                )}`,
+            );
+
+            if (waitMs > 0) {
+                await sleep(waitMs);
+            }
+
+            const actualSlot = target.toFormat("HH:mm");
+
+            try {
+                await bookSlot(actualSlot);
+            } catch (error) {
+                console.error(
+                    `Booking ${actualSlot} failed:`,
+                    error,
+                );
+
+                try {
+                    await notif.send(
+                        "Booking Error",
+                        `Automated booking for ${actualSlot} failed unexpectedly.\n\n${error instanceof Error ? error.message : String(error)}`,
+                    );
+                } catch (notificationError) {
+                    console.error(
+                        "Failed to send error notification:",
+                        notificationError,
+                    );
+                }
+            }
+        }
+
+        // We've processed today's slots.
+        // Sleep until tomorrow instead of spinning in a tight loop.
+        now = DateTime.now().setZone(TIME_ZONE);
+
+        const tomorrow = now
+            .plus({ days: 1 })
+            .startOf("day");
+
+        const waitMs = tomorrow.toMillis() - now.toMillis();
+
+        console.log(
+            `Today's slots processed. Sleeping until ${tomorrow.toFormat(
+                "yyyy-MM-dd HH:mm:ss ZZZZ",
+            )}`,
+        );
+
+        await sleep(waitMs);
+    }
+}
+
+scheduler().catch((e) => {
+    if (e instanceof AppError) {
+        console.error(e.name, e.toJSON());
+    } else {
+        console.error(e);
+    }
+
+    process.exit(1);
+});

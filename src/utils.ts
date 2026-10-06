@@ -81,14 +81,11 @@ export const sleep = (ms: number) => {
 };
 
 export const getNextBookingDate = (): string => {
-    const next = new Date();
-    next.setDate(next.getDate() + NEXT_SLOT_DAYS);
+    const next = DateTime.now()
+        .setZone(TIME_ZONE)
+        .plus({ days: NEXT_SLOT_DAYS });
 
-    const day = String(next.getDate()).padStart(2, "0");
-    const month = String(next.getMonth() + 1).padStart(2, "0");
-    const year = next.getFullYear();
-
-    return `${day}-${month}-${year}`;
+    return next.toFormat("dd-MM-yyyy");
 };
 
 /**
@@ -110,6 +107,14 @@ export const getTimeInMs = (time: string) => {
             millisecond: 0,
         });
     return target.toMillis();
+}
+
+export function getSlotForNow(): string {
+    const now = DateTime.now().setZone(TIME_ZONE);
+
+    // EET = UTC+2 -> 18:00 / 18:30
+    // EEST = UTC+3 -> 19:00 / 19:30
+    return now.isInDST ? "19:00" : "18:00";
 }
 
 /**
