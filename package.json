@@ -6,7 +6,8 @@
     "type": "module",
     "scripts": {
         "build": "tsc",
-        "book": "npm run build && node dist/index.js"
+        "book": "npm run build && node dist/index.js",
+        "test:job": "npm run build && node dist/cron-tester.js"
     },
     "repository": {
         "type": "git",
