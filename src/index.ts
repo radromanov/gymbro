@@ -40,6 +40,12 @@ async function bookSlot(timeSlot: string) {
 
     if (diff > 0) {
         console.log(`Waiting ${diff}ms before slot opens up...`);
+
+        await notif.send(
+            "Session Booking Queued",
+            `Automated booking for ${session.date}, ${session.startTime} is queued.`,
+        );
+
         await sleep(diff);
     }
 
