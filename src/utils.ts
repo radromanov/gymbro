@@ -144,7 +144,7 @@ export const processFileLineByLine = async (filepath: string, callback: (s: stri
     return false;
 }
 
-export const getSession = (schedule: ISchedule, timeSlot = env.TIME_SLOT) => {
+export const getSession = (schedule: ISchedule, timeSlot: string) => {
     // Calculate the session index instead of searching for the session
     const [hour, minute] = timeSlot.split(":").map(Number);
 

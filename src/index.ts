@@ -25,7 +25,7 @@ async function bookSlot(timeSlot: string) {
     const me = await API.GetMe(user.accessToken);
 
     const schedule = await API.GetSchedule(user.accessToken);
-    const session = getSession(schedule);
+    const session = getSession(schedule, timeSlot);
 
     // Determine if we need to wait until the provided `timeSlot`
     const targetTimeInMs = getTimeInMs(timeSlot);
