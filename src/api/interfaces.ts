@@ -80,3 +80,15 @@ export interface ISchedule {
     /** 48 entries always */
     data: ISlot[];
 }
+
+export type BookingResult = 
+    | {
+        success: true;
+        title: string;
+        message: string;
+      }
+    | {
+        success: false;
+        title: string;
+        message: string;
+      };

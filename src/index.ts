@@ -3,6 +3,7 @@ import { API } from "./api/index.js";
 import { AppError } from "./errors.js";
 import { getTimeInMs, getNextBookingDate, processFileLineByLine, sleep, TIME_ZONE, getSession } from "./utils.js";
 import { NtfyVendor } from "./notifications/vendors/ntfy.js";
+import { BookingResult } from "./api/interfaces.js";
 
 const WINTER_SLOTS = ["18:00", "18:30"] as const;
 const SUMMER_SLOTS = ["19:00", "19:30"] as const;
@@ -11,14 +12,18 @@ const RETRY_INTERVAL_MS = 250;
 const MAX_RETRY_DURATION_MS = 10_000;
 const notif = new NtfyVendor();
 
-async function bookSlot(timeSlot: string) {
+async function bookSlot(timeSlot: string): Promise<BookingResult> {
     // Load `skip-dates.txt` first
     // If NEXT is in `skip-dates.txt`, abort
     const next = getNextBookingDate();
     const skip = await processFileLineByLine("./skip-dates.txt", (s) => s === next);
     if (skip) {
         console.log(`Next date (${next}) is part of the "skip-dates.txt" file; aborting process...`)
-        return;
+        return {
+            success: false,
+            title: "Booking Skipped",
+            message: "Next date" + `(${next})` + "is listed in `skip-dates.txt` file."
+        }
     }
 
     // Starts 5 minutes early
@@ -34,18 +39,17 @@ async function bookSlot(timeSlot: string) {
     const nowInMs = DateTime.now().setZone(TIME_ZONE).toMillis();
     
     const diff = targetTimeInMs - nowInMs;
+
     if (diff < 0) {
-        throw new AppError(`Missed booking window for ${timeSlot} by ${Math.abs(diff)}ms`);
+        return {
+            success: false,
+            title: "Booking Missed",
+            message: `Missed booking window for ${timeSlot} by ${Math.abs(diff)}ms.`,
+        };
     }
 
     if (diff > 0) {
         console.log(`Waiting ${diff}ms before slot opens up...`);
-
-        await notif.send(
-            "Session Booking Queued",
-            `Automated booking for ${session.date}, ${session.startTime} is queued.`,
-        );
-
         await sleep(diff);
     }
 
@@ -61,12 +65,13 @@ async function bookSlot(timeSlot: string) {
         
         const elapsed = Date.now() - retryStartedAt;
         if (elapsed >= MAX_RETRY_DURATION_MS) {
-            await notif.send(
-                "Session Not Booked",
-                 `Automated booking for ${session.date}, ${session.startTime} failed.\n\n` +
-                 `Octiv did not accept the booking within ${MAX_RETRY_DURATION_MS / 1000} seconds.`,
-            );
-            return;
+            return {
+                success: false,
+                title: "Session Not Booked",
+                message:
+                    `Octiv did not accept the booking within ` +
+                    `${MAX_RETRY_DURATION_MS / 1000} seconds.`,
+            };
         }
         
         attempt++;
@@ -79,12 +84,14 @@ async function bookSlot(timeSlot: string) {
         // Book here
         const bookData = await API.Book(user.accessToken, session, me.id);
         if (!("message" in bookData)) {
-            console.log(`Booking successful on attempt #${attempt}`);
-            await notif.send(
-                "Session Booked",
-                `You have successfully booked your session for ${session.date}, ${session.startTime}.\n\nHappy lifting!`
-            );
-            return;
+            return {
+                success: true,
+                title: "Session Booked",
+                message:
+                    `You have successfully booked your session for ` +
+                    `${session.date}, ${session.startTime}.\n\n` +
+                    `Happy lifting!`,
+            };
         }
 
         console.log(`Booking attempt #${attempt} rejected: ${bookData.message}`);
@@ -151,18 +158,18 @@ async function scheduler() {
             const actualSlot = target.toFormat("HH:mm");
 
             try {
-                await bookSlot(actualSlot);
-            } catch (error) {
-                console.error(`Booking ${actualSlot} failed:`, error);
+                const result = await bookSlot(actualSlot);
 
-                try {
-                    await notif.send(
-                        "Booking Error",
-                        `Automated booking for ${actualSlot} failed unexpectedly.\n\n${error instanceof Error ? error.message : String(error)}`,
-                    );
-                } catch (notificationError) {
-                    console.error("Failed to send error notification:", notificationError);
-                }
+                await notif.send(result.title, result.message);
+            } catch (error) {
+                console.error(`Booking ${actualSlot} failed unexpectedly:`, error);
+
+                await notif.send(
+                    "Booking Error",
+                    error instanceof Error
+                        ? error.message
+                        : String(error),
+                );
             }
         }
 
