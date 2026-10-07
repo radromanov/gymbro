@@ -7,6 +7,8 @@ import { NtfyVendor } from "./notifications/vendors/ntfy.js";
 const WINTER_SLOTS = ["18:00", "18:30"] as const;
 const SUMMER_SLOTS = ["19:00", "19:30"] as const;
 const PREPARE_AHEAD_MS = 5 * 60 * 1000;
+const RETRY_INTERVAL_MS = 250;
+const MAX_RETRY_DURATION_MS = 10_000;
 const notif = new NtfyVendor();
 
 async function bookSlot(timeSlot: string) {
@@ -19,7 +21,7 @@ async function bookSlot(timeSlot: string) {
         return;
     }
 
-    // CRON job will have to install dependencies - it starts 5 minutes early
+    // Starts 5 minutes early
     // Once this script runs, login and get schedule
     const user = await API.Login();
     const me = await API.GetMe(user.accessToken);
@@ -33,9 +35,7 @@ async function bookSlot(timeSlot: string) {
     
     const diff = targetTimeInMs - nowInMs;
     if (diff < 0) {
-        throw new AppError(
-            `Missed booking window for ${timeSlot} by ${Math.abs(diff)}ms`
-        );
+        throw new AppError(`Missed booking window for ${timeSlot} by ${Math.abs(diff)}ms`);
     }
 
     if (diff > 0) {
@@ -49,26 +49,45 @@ async function bookSlot(timeSlot: string) {
         await sleep(diff);
     }
 
-    console.log(
-        `Booking ${timeSlot} at ${DateTime.now()
-            .setZone(TIME_ZONE)
-            .toFormat("yyyy-MM-dd HH:mm:ss.SSS ZZZZ")}`,
-    );
-    
-    // Book here
-    const bookData = await API.Book(user.accessToken, session, me.id);
-    
-    // Notifications
-    if ("message" in bookData) {
-        await notif.send(
-            "Session Not Booked",
-            `Automated booking for ${session.date}, ${session.startTime} failed.\n\n${bookData.message}`,
+    let attempt = 0;
+    const retryStartedAt = Date.now();
+
+    while (true) {
+        const nextAttemptAt = retryStartedAt + attempt * RETRY_INTERVAL_MS;
+        const waitMs = nextAttemptAt - Date.now();
+        if (waitMs > 0) {
+            await sleep(waitMs);
+        }
+        
+        const elapsed = Date.now() - retryStartedAt;
+        if (elapsed >= MAX_RETRY_DURATION_MS) {
+            await notif.send(
+                "Session Not Booked",
+                 `Automated booking for ${session.date}, ${session.startTime} failed.\n\n` +
+                 `Octiv did not accept the booking within ${MAX_RETRY_DURATION_MS / 1000} seconds.`,
+            );
+            return;
+        }
+        
+        attempt++;
+        console.log(
+            `Booking attempt #${attempt} at ${DateTime.now()
+                .setZone(TIME_ZONE)
+                .toFormat("yyyy-MM-dd HH:mm:ss.SSS ZZZZ")}`,
         );
-    } else {
-        await notif.send(
-            "Session Booked",
-            `You have successfully booked your session for ${session.date}, ${session.startTime}.\n\nHappy lifting!`
-        );
+
+        // Book here
+        const bookData = await API.Book(user.accessToken, session, me.id);
+        if (!("message" in bookData)) {
+            console.log(`Booking successful on attempt #${attempt}`);
+            await notif.send(
+                "Session Booked",
+                `You have successfully booked your session for ${session.date}, ${session.startTime}.\n\nHappy lifting!`
+            );
+            return;
+        }
+
+        console.log(`Booking attempt #${attempt} rejected: ${bookData.message}`);
     }
 }
 
@@ -88,11 +107,7 @@ async function scheduler() {
 
             const waitMs = nextMonday.toMillis() - now.toMillis();
 
-            console.log(
-                `Weekend. Sleeping until ${nextMonday.toFormat(
-                    "yyyy-MM-dd HH:mm:ss ZZZZ",
-                )}`,
-            );
+            console.log(`Weekend. Sleeping until ${nextMonday.toFormat("yyyy-MM-dd HH:mm:ss ZZZZ")}`);
 
             await sleep(waitMs);
             continue;
@@ -126,17 +141,8 @@ async function scheduler() {
 
             const waitMs = prepareAt.toMillis() - now.toMillis();
 
-            console.log(
-                `Next booking: ${target.toFormat(
-                    "yyyy-MM-dd HH:mm:ss.SSS ZZZZ",
-                )}`,
-            );
-
-            console.log(
-                `Preparing at: ${prepareAt.toFormat(
-                    "yyyy-MM-dd HH:mm:ss.SSS ZZZZ",
-                )}`,
-            );
+            console.log(`Next booking: ${target.toFormat("yyyy-MM-dd HH:mm:ss.SSS ZZZZ")}`);
+            console.log(`Preparing at: ${prepareAt.toFormat("yyyy-MM-dd HH:mm:ss.SSS ZZZZ")}`);
 
             if (waitMs > 0) {
                 await sleep(waitMs);
@@ -147,10 +153,7 @@ async function scheduler() {
             try {
                 await bookSlot(actualSlot);
             } catch (error) {
-                console.error(
-                    `Booking ${actualSlot} failed:`,
-                    error,
-                );
+                console.error(`Booking ${actualSlot} failed:`, error);
 
                 try {
                     await notif.send(
@@ -158,10 +161,7 @@ async function scheduler() {
                         `Automated booking for ${actualSlot} failed unexpectedly.\n\n${error instanceof Error ? error.message : String(error)}`,
                     );
                 } catch (notificationError) {
-                    console.error(
-                        "Failed to send error notification:",
-                        notificationError,
-                    );
+                    console.error("Failed to send error notification:", notificationError);
                 }
             }
         }
@@ -176,11 +176,7 @@ async function scheduler() {
 
         const waitMs = tomorrow.toMillis() - now.toMillis();
 
-        console.log(
-            `Today's slots processed. Sleeping until ${tomorrow.toFormat(
-                "yyyy-MM-dd HH:mm:ss ZZZZ",
-            )}`,
-        );
+        console.log(`Today's slots processed. Sleeping until ${tomorrow.toFormat("yyyy-MM-dd HH:mm:ss ZZZZ")}`);
 
         await sleep(waitMs);
     }
