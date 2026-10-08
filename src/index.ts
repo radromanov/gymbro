@@ -5,10 +5,10 @@ import { NtfyVendor } from "./notifications/vendors/ntfy.js";
 import { BookingResult } from "./api/interfaces.js";
 import { API } from "./api/index.js";
 
-const BOOKING_SLOTS = ["08:00", "18:30"] as const; // We want to book a slot for 18:00 and 18:30
+const BOOKING_SLOTS = ["18:00", "18:30"] as const; // We want to book a slot for 18:00 and 18:30
 const ATTEMPT_TIMES = [
     ["18:00", "18:30"], // Out of DST (Winter)
-    ["09:00", "19:30"], // In DST (Summer)
+    ["19:00", "19:30"], // In DST (Summer)
 ] as const;
 const PREPARE_AHEAD_MS = 5 * 60 * 1000;
 const RETRY_INTERVAL_MS = 250;
@@ -56,29 +56,14 @@ async function retryBooking(book: () => Promise<BookingResult>): Promise<Booking
     }
 }
 
-async function bookSlot(timeSlot: string, attemptTime: string): Promise<BookingResult> {
-    // Load `skip-dates.txt` first
-    // If NEXT is in `skip-dates.txt`, abort
-    const next = getNextBookingDate();
-    const skip = await processFileLineByLine("./skip-dates.txt", (s) => s === next);
-    if (skip) {
-        console.log(`Next date (${next}) is part of the "skip-dates.txt" file; aborting process...`)
-        return {
-            success: false,
-            title: "Booking Skipped",
-            message: "Next date" + `(${next})` + "is listed in `skip-dates.txt` file."
-        }
-    }
-
-    // Starts 5 minutes early
-    // Once this script runs, login and get schedule
+async function bookSlot(slotTime: string, attemptTime: string): Promise<BookingResult> {
     const user = await API.Login();
     const me = await API.GetMe(user.accessToken);
 
     const schedule = await API.GetSchedule(user.accessToken);
-    const session = getSession(schedule, timeSlot);
+    const session = getSession(schedule, slotTime);
 
-    // Determine if we need to wait until the provided `timeSlot`
+    // Wait until the actual booking attempt time.
     const targetTimeInMs = getTimeInMs(attemptTime);
     const nowInMs = DateTime.now().setZone(TIME_ZONE).toMillis();
     
@@ -88,7 +73,7 @@ async function bookSlot(timeSlot: string, attemptTime: string): Promise<BookingR
         return {
             success: false,
             title: "Booking Missed",
-            message: `Missed booking window for ${timeSlot} by ${Math.abs(diff)}ms.`,
+            message: `Missed booking window for ${session.date}, ${session.startTime} by ${Math.abs(diff)}ms.`,
         };
     }
 
@@ -143,11 +128,52 @@ async function scheduler() {
             await sleep(waitMs);
             continue;
         }
+        
+        /*
+         * Determine the actual date we're trying to book.
+         * This is always 14 calendar days from today.
+         */
+        const bookingDate = getNextBookingDate();
 
+        /*
+         * Skip the entire booking cycle if this date is listed.
+         * Both 18:00 and 18:30 are skipped together.
+         */
+        const shouldSkip = await processFileLineByLine("./skip-dates.txt", (date) => date === bookingDate);
+
+        if (shouldSkip) {
+            console.log(
+                `Booking date ${bookingDate} is listed in ` +
+                `"skip-dates.txt"; skipping today's booking cycle.`,
+            );
+            
+            await notif.send(
+                "Booking Skipped",
+                `Booking for ${bookingDate} was skipped.`,
+            );
+
+            now = DateTime.now().setZone(TIME_ZONE);
+            const tomorrow = now
+                .plus({ days: 1 })
+                .startOf("day");
+            const waitMs = tomorrow.toMillis() - now.toMillis();
+            
+            await sleep(waitMs);
+            continue;
+        }
+
+        /*
+         * The session we're booking is ALWAYS 18:00 / 18:30.
+         *
+         * The time at which we attempt the booking changes with DST:
+         *
+         * Winter: 18:00 / 18:30 (out DST)
+         * Summer: 19:00 / 19:30 (in DST)
+         */
         const attemptIdx = now.isInDST ? 1 : 0;
 
         for (let i = 0; i < BOOKING_SLOTS.length; i++) {
-            const slotToBook = BOOKING_SLOTS[i];
+            const slotTime = BOOKING_SLOTS[i];
             const attemptTime = ATTEMPT_TIMES[attemptIdx][i];
 
             // Recalculate the current time before every slot.
@@ -173,23 +199,19 @@ async function scheduler() {
 
             const waitMs = prepareAt.toMillis() - now.toMillis();
 
-            console.log(
-                `Booking ${slotToBook}; attempt time: ${target.toFormat("yyyy-MM-dd HH:mm:ss.SSS ZZZZ")}`,
-            );
-
-            console.log(
-                `Preparing at: ${prepareAt.toFormat("yyyy-MM-dd HH:mm:ss.SSS ZZZZ")}`,
-            );
+            console.log(`Date/slot to book: ${bookingDate}, ${slotTime}`);
+            console.log(`Preparing to book at: ${prepareAt.toFormat("yyyy-MM-dd HH:mm:ss.SSS ZZZZ")}`);
+            console.log(`Attemping the booking at: ${target.toFormat("yyyy-MM-dd HH:mm:ss.SSS ZZZZ")}`);
 
             if (waitMs > 0) {
                 await sleep(waitMs);
             }
 
             try {
-                const result = await bookSlot(slotToBook, attemptTime);
+                const result = await bookSlot(slotTime, attemptTime);
                 await notif.send(result.title, result.message);
             } catch (error) {
-                console.error(`Booking ${slotToBook} failed unexpectedly:`, error);
+                console.error(`Booking ${bookingDate}, ${slotTime} failed unexpectedly:`, error);
 
                 await notif.send(
                     "Booking Error",

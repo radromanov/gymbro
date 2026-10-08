@@ -109,14 +109,6 @@ export const getTimeInMs = (time: string) => {
     return target.toMillis();
 }
 
-export function getSlotForNow(): string {
-    const now = DateTime.now().setZone(TIME_ZONE);
-
-    // EET = UTC+2 -> 18:00 / 18:30
-    // EEST = UTC+3 -> 19:00 / 19:30
-    return now.isInDST ? "19:00" : "18:00";
-}
-
 /**
  * 
  * @param filepath Path relative to project root.
