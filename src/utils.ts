@@ -80,12 +80,12 @@ export const sleep = (ms: number) => {
     return new Promise((resolve) => setTimeout(resolve, ms));
 };
 
-export const getNextBookingDate = (): string => {
-    const next = DateTime.now()
+export const getNextBookingDate = () => {
+    return DateTime.now()
         .setZone(TIME_ZONE)
-        .plus({ days: NEXT_SLOT_DAYS });
-
-    return next.toFormat("dd-MM-yyyy");
+        .startOf("day")
+        .plus({ days: NEXT_SLOT_DAYS })
+        .toFormat("dd-MM-yyyy");
 };
 
 /**

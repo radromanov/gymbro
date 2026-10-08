@@ -1,18 +1,62 @@
 import { DateTime } from "luxon";
-import { API } from "./api/index.js";
 import { AppError } from "./errors.js";
 import { getTimeInMs, getNextBookingDate, processFileLineByLine, sleep, TIME_ZONE, getSession } from "./utils.js";
 import { NtfyVendor } from "./notifications/vendors/ntfy.js";
 import { BookingResult } from "./api/interfaces.js";
+import { API } from "./api/index.js";
 
-const WINTER_SLOTS = ["18:00", "18:30"] as const;
-const SUMMER_SLOTS = ["19:00", "19:30"] as const;
+const BOOKING_SLOTS = ["08:00", "18:30"] as const; // We want to book a slot for 18:00 and 18:30
+const ATTEMPT_TIMES = [
+    ["18:00", "18:30"], // Out of DST (Winter)
+    ["09:00", "19:30"], // In DST (Summer)
+] as const;
 const PREPARE_AHEAD_MS = 5 * 60 * 1000;
 const RETRY_INTERVAL_MS = 250;
-const MAX_RETRY_DURATION_MS = 10_000;
+const MAX_RETRY_DURATION_MS = 1_500; // only attempt for 1.5 seconds
 const notif = new NtfyVendor();
 
-async function bookSlot(timeSlot: string): Promise<BookingResult> {
+async function retryBooking(book: () => Promise<BookingResult>): Promise<BookingResult> {
+    let attempt = 0;
+    const retryStartedAt = Date.now();
+
+    while (true) {
+        const nextAttemptAt = retryStartedAt + attempt * RETRY_INTERVAL_MS;
+        const waitMs = nextAttemptAt - Date.now();
+
+        if (waitMs > 0) {
+            await sleep(waitMs);
+        }
+
+        const elapsed = Date.now() - retryStartedAt;
+        if (elapsed >= MAX_RETRY_DURATION_MS) {
+            return {
+                success: false,
+                title: "Session Not Booked",
+                message:
+                    `Octiv did not accept the booking within ` +
+                    `${MAX_RETRY_DURATION_MS / 1000} seconds.`,
+            };
+        }
+
+        attempt++;
+        console.log(
+            `Booking attempt #${attempt} at ${DateTime.now()
+                .setZone(TIME_ZONE)
+                .toFormat("yyyy-MM-dd HH:mm:ss.SSS ZZZZ")}`,
+        );
+
+        const result = await book();
+        if (result.success) {
+            return result;
+        }
+        
+        console.log(
+            `Booking attempt #${attempt} rejected: ${result.message}`,
+        );
+    }
+}
+
+async function bookSlot(timeSlot: string, attemptTime: string): Promise<BookingResult> {
     // Load `skip-dates.txt` first
     // If NEXT is in `skip-dates.txt`, abort
     const next = getNextBookingDate();
@@ -35,7 +79,7 @@ async function bookSlot(timeSlot: string): Promise<BookingResult> {
     const session = getSession(schedule, timeSlot);
 
     // Determine if we need to wait until the provided `timeSlot`
-    const targetTimeInMs = getTimeInMs(timeSlot);
+    const targetTimeInMs = getTimeInMs(attemptTime);
     const nowInMs = DateTime.now().setZone(TIME_ZONE).toMillis();
     
     const diff = targetTimeInMs - nowInMs;
@@ -52,50 +96,30 @@ async function bookSlot(timeSlot: string): Promise<BookingResult> {
         console.log(`Waiting ${diff}ms before slot opens up...`);
         await sleep(diff);
     }
-
-    let attempt = 0;
-    const retryStartedAt = Date.now();
-
-    while (true) {
-        const nextAttemptAt = retryStartedAt + attempt * RETRY_INTERVAL_MS;
-        const waitMs = nextAttemptAt - Date.now();
-        if (waitMs > 0) {
-            await sleep(waitMs);
-        }
-        
-        const elapsed = Date.now() - retryStartedAt;
-        if (elapsed >= MAX_RETRY_DURATION_MS) {
-            return {
-                success: false,
-                title: "Session Not Booked",
-                message:
-                    `Octiv did not accept the booking within ` +
-                    `${MAX_RETRY_DURATION_MS / 1000} seconds.`,
-            };
-        }
-        
-        attempt++;
-        console.log(
-            `Booking attempt #${attempt} at ${DateTime.now()
-                .setZone(TIME_ZONE)
-                .toFormat("yyyy-MM-dd HH:mm:ss.SSS ZZZZ")}`,
-        );
-
-        // Book here
+    
+    return await retryBooking(async () => {
         const bookData = await API.Book(user.accessToken, session, me.id);
         if (!("message" in bookData)) {
             return {
                 success: true,
                 title: "Session Booked",
                 message:
-                    `You have successfully booked your session for ` +
+                    "You have successfully booked your session for " +
                     `${session.date}, ${session.startTime}.\n\n` +
-                    `Happy lifting!`,
-            };
+                    "Happy lifting!",
+            }
         }
 
-        console.log(`Booking attempt #${attempt} rejected: ${bookData.message}`);
-    }
+        return {
+            success: false,
+            title: "Session Not Booked",
+            message:
+                "Booking for " +
+                `${session.date}, ${session.startTime}` +
+                "was rejected.\n\n" +
+                `Reason: ${bookData.message}`
+        };
+    });
 }
 
 async function scheduler() {
@@ -120,15 +144,16 @@ async function scheduler() {
             continue;
         }
 
-        const slotsToBook = now.isInDST
-            ? SUMMER_SLOTS
-            : WINTER_SLOTS;
+        const attemptIdx = now.isInDST ? 1 : 0;
 
-        for (const slot of slotsToBook) {
+        for (let i = 0; i < BOOKING_SLOTS.length; i++) {
+            const slotToBook = BOOKING_SLOTS[i];
+            const attemptTime = ATTEMPT_TIMES[attemptIdx][i];
+
             // Recalculate the current time before every slot.
             now = DateTime.now().setZone(TIME_ZONE);
 
-            const [hour, minute] = slot.split(":").map(Number);
+            const [hour, minute] = attemptTime.split(":").map(Number);
 
             const target = now.startOf("day").set({
                 hour,
@@ -148,21 +173,23 @@ async function scheduler() {
 
             const waitMs = prepareAt.toMillis() - now.toMillis();
 
-            console.log(`Next booking: ${target.toFormat("yyyy-MM-dd HH:mm:ss.SSS ZZZZ")}`);
-            console.log(`Preparing at: ${prepareAt.toFormat("yyyy-MM-dd HH:mm:ss.SSS ZZZZ")}`);
+            console.log(
+                `Booking ${slotToBook}; attempt time: ${target.toFormat("yyyy-MM-dd HH:mm:ss.SSS ZZZZ")}`,
+            );
+
+            console.log(
+                `Preparing at: ${prepareAt.toFormat("yyyy-MM-dd HH:mm:ss.SSS ZZZZ")}`,
+            );
 
             if (waitMs > 0) {
                 await sleep(waitMs);
             }
 
-            const actualSlot = target.toFormat("HH:mm");
-
             try {
-                const result = await bookSlot(actualSlot);
-
+                const result = await bookSlot(slotToBook, attemptTime);
                 await notif.send(result.title, result.message);
             } catch (error) {
-                console.error(`Booking ${actualSlot} failed unexpectedly:`, error);
+                console.error(`Booking ${slotToBook} failed unexpectedly:`, error);
 
                 await notif.send(
                     "Booking Error",
