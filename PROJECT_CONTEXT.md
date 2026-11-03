@@ -4,7 +4,7 @@ Last updated: 2026-11-03 (Europe/Sofia).
 
 ## Purpose and maintenance
 
-GymBro is a small, long-running Node.js service that automatically books Octiv gym sessions 14 calendar days ahead and sends push notifications through ntfy. There is no web UI, HTTP server, database, or persistent booking history in this repository.
+GymBro is a small, long-running Node.js service that automatically books Octiv gym sessions 14 calendar days ahead and sends push notifications through ntfy. There is no web UI, HTTP server, database, or persistent booking history. An explicit one-off diagnostic runner can retain redacted evidence in ignored local JSONL logs.
 
 Read `AGENTS.md` first. Every coherent project change must update this file in the same change set, including a dated entry below. Keep the sections describing current behavior accurate; the change log alone is insufficient when behavior changes. Source code is authoritative when documentation and implementation disagree. Keep secrets out of this file.
 
@@ -15,7 +15,7 @@ Read `AGENTS.md` first. Every coherent project change must update this file in t
 - `tsconfig.json` targets ES2024, NodeNext modules with node16 resolution, strict checking, unused-local/parameter checks, and no switch fallthrough. Input is `src/**/*`, output is `dist/`; `tests/`, `dist/`, and `node_modules/` are excluded. Tests inside `src/` would still be compiler inputs.
 - The compiler configuration describes Node LTS 24; no `engines` restriction is declared. The inspection environment has Node v24.22.1.
 - Lockfile v3 has 129 package entries. Direct locked runtime versions: dotenv 18.0.5, luxon 3.7.2, typebox 1.3.34. Direct development versions: TypeScript 7.0.2, Vitest 3.2.7, @types/node 26.6.4, @types/luxon 3.7.6. Consult the lockfile after dependency changes.
-- `.gitignore` excludes `.env`, `node_modules`, and `dist`. These are local configuration, installed dependencies, and generated output, respectively; they are not maintained application source.
+- `.gitignore` excludes `.env`, `node_modules`, `dist`, and `logs/`. Diagnostic logs are local operational artifacts and must never contain credentials or account identifiers.
 - Run the service from the repository root: both `./skip-dates.txt` and default dotenv loading depend on the process working directory.
 - No CI workflow, deployment definition, linter, formatter configuration, container definition, or Git hook is present in the inspected project files. Deployment/supervision is not specified here.
 - Do not run `npm run book`, execute `dist/index.js`, or import `src/index.ts` for routine validation: these start the live scheduler.
@@ -37,6 +37,9 @@ Read `AGENTS.md` first. Every coherent project change must update this file in t
 | --- | --- |
 | `src/index.ts` | Instantiates ntfy, prepares API sessions, interprets booking responses, connects retries to the cycle, and immediately starts the endless scheduler. Top-level catch logs and exits with code 1. |
 | `src/core.ts` | Dependency-injected cycle timing, weekday/skip handling, preparation/attempt separation, tomorrow sleep, and retry loop. Exports scheduler/result/dependency types and booking-slot constants. |
+| `src/diagnostic.ts` | Dependency-injected one-off opening runner and allowlisted booking response evidence; uses existing retry policy. |
+| `src/diagnose-booking.ts` | Explicit live diagnostic CLI; prepares a single validated date/time, observes HTTP timing/status/server Date, and writes redacted JSONL without starting the normal scheduler or sending notifications. |
+| `tests/diagnostic.test.ts` | Mocked winter/summer timing, skips, lateness, retry outcomes, and response redaction coverage. |
 | `src/config.ts` | dotenv loading and required environment validation. |
 | `src/utils.ts` | API HTTP helper, common request headers, Sofia/14-day constants, sleep/date/time helpers, skip-file scanning, and positional session selection. |
 | `src/api/index.ts` | `API` facade exposing `Login`, `GetMe`, `GetSchedule`, and `Book`. |
@@ -83,6 +86,14 @@ Read `AGENTS.md` first. Every coherent project change must update this file in t
 
 ## Verification and known gaps
 
+### One-off live diagnostic
+
+After building, run `node dist/diagnose-booking.js <opening-ISO-with-offset> <booking-yyyy-MM-dd> <slot-HH:mm>` from the repository root. This is an explicitly live booking command. It requires a future opening and a booking date exactly 14 Sofia calendar days later. It prepares five minutes ahead, honors/rechecks skip dates, validates the existing positional selection against the requested date/time, refuses an occupied slot, and stops after one opening. It does not apply the recurring scheduler's weekday rules. Regular scheduling and HTTP behavior remain unchanged.
+
+Logs are `logs/booking-yyyyMMdd-HHmmss.jsonl` (opening in Sofia). Evidence includes request start/response times, status/server Date, session date/time/threshold, and each retry result. Request bodies, full URLs, auth/profile responses, tokens, and account/session IDs are never persisted. Only the known advance-booking rejection and BOOKED/WAITING status names are retained from booking bodies; other arbitrary server text is omitted. Only explicit BOOKED counts as success; ambiguous/waiting responses stop without duplicate POSTs. The existing 250 ms / 1,500 ms retry policy is retained, including a generic final deadline message; per-attempt evidence preserves the rejection. No post-window probes or automatic extra retries occur. There is no request timeout or machine-sleep prevention.
+
+2026-11-03 diagnostic verification: direct TypeScript build and final no-emit check passed; Vitest passed all 11 tests in `tests/diagnostic.test.ts`, using mocked dependencies and no live services. The earlier no-tests baseline below describes the previous inspection, not current coverage. The user-authorized live run successfully booked 2026-11-17 06:30 on the first attempt: POST began at 2026-11-03 07:30:00.013 +02:00; HTTP 201 returned at 07:30:00.281, followed by explicit BOOKED confirmation at 07:30:00.283. The process exited 0 and is no longer running. The advance-booking rejection was not reproduced, so its cause remains undetermined. Restricted-network preparation initially failed with ENOTFOUND; network-enabled login/profile/schedule then succeeded and validated the unoccupied requested session at 07:26. Evidence is retained in `logs/booking-20261103-073000.jsonl`. This one successful observation does not establish that recurring bookings are fixed; recurring code was unchanged.
+
 Inspection covered all maintained source files, repository documentation/configuration/operational data, the lockfile dependency graph, Git status, and the staged-but-deleted test described below. Generated `dist/`, third-party `node_modules/`, Git internals, and secret `.env` contents are outside the maintained-source review.
 
 Baseline checks on 2026-11-03:
@@ -105,6 +116,14 @@ The staged test was read with `git show :src/scheduler.test.ts`. It contains eig
 These notes record the initial handoff, not a permanent claim about future Git status. Always inspect the current working tree and actual test files.
 
 ## Change log
+
+### 2026-11-03 — One-off booking evidence capture
+
+- Added a separate, explicit live diagnostic CLI for the user-requested upcoming 06:30 session, without changing the recurring scheduler or its timing. Added ignored local redacted JSONL logs for transport timing/status, selected session thresholds, and booking outcomes.
+- Preserved preparation/attempt separation and existing retry cadence; added target/date validation, skip recheck, occupied-slot refusal, and safe stopping on ambiguous booking responses. No external notifications are sent by this runner.
+- Validation: `node node_modules/typescript/bin/tsc` and final `node node_modules/typescript/bin/tsc --noEmit` passed; `node node_modules/vitest/vitest.mjs run` passed all 11 mocked diagnostic tests, including the final run. Git diff whitespace check passed (only a line-ending conversion notice). Initial 07:25 preparation stopped on restricted-network DNS failure before any booking; added allowlisted transport error codes. Network-enabled preparation succeeded at 07:26. The live POST at 07:30:00.013 +02:00 returned HTTP 201 and explicit BOOKED at 07:30:00.283 for the requested November 17 06:30 session. One attempt, process exit 0; no regular scheduler or ntfy notifications started.
+- The reported advance-booking failure was not reproduced and its cause remains undetermined. Evidence is retained locally at `logs/booking-20261103-073000.jsonl`; no credentials/account identifiers were logged. Existing unbounded HTTP requests and short retry window remain observation limitations. The architecture adds only the optional diagnostic CLI; production scheduling and transport were not changed.
+- Repository was clean at the start of this task; the previous inspection's pending-work notes are historical. No existing files were staged, restored, or committed.
 
 ### 2026-11-03 — Establish maintained AI project context
 
