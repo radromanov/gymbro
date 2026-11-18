@@ -10,6 +10,7 @@ import { NtfyVendor } from "./notifications/vendors/ntfy.js";
 import { BookingResult } from "./api/interfaces.js";
 import { API } from "./api/index.js";
 import { retryBooking, runBookingCycle, sleepUntilTomorrow } from "./core.js";
+import { skipEntryMatches } from "./skip-dates.js";
 
 const notif = new NtfyVendor();
 
@@ -71,7 +72,7 @@ async function scheduler(): Promise<never> {
             isSkipped: (bookingDate) =>
                 processFileLineByLine(
                     "./skip-dates.txt",
-                    (date) => date === bookingDate,
+                    (line) => skipEntryMatches(line, bookingDate),
                 ),
             prepareBooking,
             notify: (title, message) => notif.send(title, message),

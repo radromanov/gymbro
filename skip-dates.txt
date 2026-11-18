@@ -1,6 +1,9 @@
 # Any line CONTAINING one or more "#" characters is treated as a comment.
 # Any date in this list gets skipped (the program will not book it).
 # Dates must be in dd-MM-yyyy format.
+# Inclusive ranges are allowed: 01-12-2026..05-12-2026 (or "01-12-2026 to 05-12-2026").
+# Weekend days inside a range need no special handling; the scheduler never books weekends.
 
 23-10-2026
 04-11-2026
+26-11-2026

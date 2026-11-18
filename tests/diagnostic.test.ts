@@ -27,8 +27,9 @@ describe("one-off diagnostic", () => {
         const result = await runDiagnostic(opening, f.deps);
         expect(f.deps.sleep).toHaveBeenNthCalledWith(1, 300000);
         expect(f.deps.sleep).toHaveBeenNthCalledWith(2, 300000);
-        expect(f.attempts).toHaveLength(6);
-        expect(f.attempts.map((time) => DateTime.fromISO(time).toMillis() - opening.toMillis())).toEqual([0, 250, 500, 750, 1000, 1250]);
+        // 4,000 ms window at 250 ms intervals: attempts at 0..3,750 ms, none at the deadline.
+        expect(f.attempts).toHaveLength(16);
+        expect(f.attempts.map((time) => DateTime.fromISO(time).toMillis() - opening.toMillis())).toEqual(Array.from({ length: 16 }, (_, i) => i * 250));
         expect(result.success).toBe(false);
     });
     it("stops after success", async () => {

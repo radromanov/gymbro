@@ -3,6 +3,7 @@ import { DateTime } from "luxon";
 import { API } from "./api/index.js";
 import { hit, getSession, sleep, TIME_ZONE, NEXT_SLOT_DAYS, processFileLineByLine } from "./utils.js";
 import { bookingEvidence, runDiagnostic } from "./diagnostic.js";
+import { SKIP_DATE_FORMAT, skipEntryMatches } from "./skip-dates.js";
 
 const [openingArg, date, slot] = process.argv.slice(2);
 const opening = DateTime.fromISO(openingArg ?? "", { setZone: true }).setZone(TIME_ZONE);
@@ -53,7 +54,7 @@ globalThis.fetch = async (input, init) => {
 try {
     const result = await runDiagnostic(opening, {
         now: () => DateTime.now(), sleep, log,
-        isSkipped: () => processFileLineByLine("./skip-dates.txt", (line) => line === DateTime.fromISO(date).toFormat("dd-MM-yyyy")),
+        isSkipped: () => processFileLineByLine("./skip-dates.txt", (line) => skipEntryMatches(line, DateTime.fromISO(date).toFormat(SKIP_DATE_FORMAT))),
         prepare: async () => {
             const user = await API.Login();
             if (typeof user.accessToken !== "string") throw new Error("Login returned no access token");

@@ -1,6 +1,6 @@
 # GymBro project context
 
-Last updated: 2026-11-03 (Europe/Sofia).
+Last updated: 2026-11-18 (Europe/Sofia).
 
 ## Purpose and maintenance
 
@@ -40,6 +40,9 @@ Read `AGENTS.md` first. Every coherent project change must update this file in t
 | `src/diagnostic.ts` | Dependency-injected one-off opening runner and allowlisted booking response evidence; uses existing retry policy. |
 | `src/diagnose-booking.ts` | Explicit live diagnostic CLI; prepares a single validated date/time, observes HTTP timing/status/server Date, and writes redacted JSONL without starting the normal scheduler or sending notifications. |
 | `tests/diagnostic.test.ts` | Mocked winter/summer timing, skips, lateness, retry outcomes, and response redaction coverage. |
+| `src/skip-dates.ts` | Env-free parsing/matching of skip-file lines: single `dd-MM-yyyy` dates and inclusive ranges. |
+| `tests/core.test.ts` | Mocked recurring-cycle coverage: 19:00/19:30 attempts (18:55/19:25 preparation) in both winter and summer, passed attempt time, skipped date, weekend sleep. |
+| `tests/skip-dates.test.ts` | Single-date, inclusive range, month/year/DST boundary, and invalid-line coverage for skip entries. |
 | `src/config.ts` | dotenv loading and required environment validation. |
 | `src/utils.ts` | API HTTP helper, common request headers, Sofia/14-day constants, sleep/date/time helpers, skip-file scanning, and positional session selection. |
 | `src/api/index.ts` | `API` facade exposing `Login`, `GetMe`, `GetSchedule`, and `Book`. |
@@ -51,7 +54,7 @@ Read `AGENTS.md` first. Every coherent project change must update this file in t
 | `src/errors.ts` | `AppError`, its JSON serialization, and Method/Login/Session/Schedule/Book/Vendor error classes. |
 | `src/notifications/vendor.ts` | `Vendors` enum (`Ntfy`, `None`), `IVendor`, and abstract `Vendor`; no implementation of the `None` option. |
 | `src/notifications/vendors/ntfy.ts` | POSTs notification text to ntfy with `GymBro | ` title prefix, high priority, 10-second abort timeout, and non-OK response rejection. |
-| `skip-dates.txt` | Booking dates excluded by the scheduler, in `dd-MM-yyyy` format. |
+| `skip-dates.txt` | Booking dates excluded by the scheduler: `dd-MM-yyyy` single dates or inclusive `dd-MM-yyyy..dd-MM-yyyy` / `dd-MM-yyyy to dd-MM-yyyy` ranges. |
 | `README.md` | Project title and entry points for agent documentation. |
 | `package.json`, `package-lock.json`, `tsconfig.json`, `.gitignore` | Commands/dependency declarations, reproducible dependency graph, compiler settings, and ignored local artifacts. |
 | `AGENTS.md`, `PROJECT_CONTEXT.md` | Mandatory agent workflow and this maintained project map. |
@@ -78,7 +81,7 @@ Read `AGENTS.md` first. Every coherent project change must update this file in t
 - `ISchedule.data` is assumed to contain 48 half-hour entries in chronological order from midnight. `getSession()` indexes `hour * 2 + (minute !== 0 ? 1 : 0)`; it does not search, validate time/date, check array bounds, availability, capacity, or waiting-list counts.
 - Slot dates and API date filters use `yyyy-MM-dd`; skip dates and cycle reporting use `dd-MM-yyyy`; slot times use `HH:mm` / API `HH:mm:ss` strings. Interface comments label some times `HH-MM-SS`, but examples/code use colons.
 - `schedule()` computes its own date from the real clock, adding 14 days before setting the Sofia zone. It does not accept the cycle's `bookingDate` or injected clock. These paths can diverge near midnight, host-zone/DST boundaries, or long delays.
-- `processFileLineByLine()` ignores empty lines and every line containing `#` anywhere, trims the rest, and returns true on the first matching callback. An inline comment discards the entire line. A missing/unreadable file fails the operation. Changes made after a cycle's skip check are not rechecked for its later slot.
+- `processFileLineByLine()` ignores empty lines and every line containing `#` anywhere, trims the rest, and returns true on the first matching callback. Both the scheduler and diagnostic CLI pass each line to `skipEntryMatches()` (`src/skip-dates.ts`). A line is a single date or an inclusive range (`..` or case-insensitive `to`, optional spaces); ranges are compared, never expanded, so weekend days inside a range need no handling (weekend cycles never query skips). Impossible dates, other formats (including `a - b`), and reversed ranges never match and emit a `console.warn` on every check; they do not stop the scheduler. An inline comment discards the entire line. A missing/unreadable file fails the operation. Changes made after a cycle's skip check are not rechecked for its later slot.
 - Initial skip-file contents exclude `23-10-2026` and `04-11-2026`; these are booking dates, not scheduler execution dates. Read the file for current exclusions.
 - `getNextBookingDate()` computes the formatted future Sofia date; `getTimeInMs()` validates `HH:mm` and returns today's Sofia timestamp. Neither is used by the current scheduler entry point. `sleep()` is a simple `setTimeout` promise.
 - `AppError` sets its prototype explicitly to `AppError.prototype`, including when constructed through subclasses. Subclass names are assigned, but subclass `instanceof` behavior is therefore unreliable. Its JSON output includes name, message, and stack.
@@ -90,7 +93,7 @@ Read `AGENTS.md` first. Every coherent project change must update this file in t
 
 After building, run `node dist/diagnose-booking.js <opening-ISO-with-offset> <booking-yyyy-MM-dd> <slot-HH:mm>` from the repository root. This is an explicitly live booking command. It requires a future opening and a booking date exactly 14 Sofia calendar days later. It prepares five minutes ahead, honors/rechecks skip dates, validates the existing positional selection against the requested date/time, refuses an occupied slot, and stops after one opening. It does not apply the recurring scheduler's weekday rules. Regular scheduling and HTTP behavior remain unchanged.
 
-Logs are `logs/booking-yyyyMMdd-HHmmss.jsonl` (opening in Sofia). Evidence includes request start/response times, status/server Date, session date/time/threshold, and each retry result. Request bodies, full URLs, auth/profile responses, tokens, and account/session IDs are never persisted. Only the known advance-booking rejection and BOOKED/WAITING status names are retained from booking bodies; other arbitrary server text is omitted. Only explicit BOOKED counts as success; ambiguous/waiting responses stop without duplicate POSTs. The existing 250 ms / 1,500 ms retry policy is retained, including a generic final deadline message; per-attempt evidence preserves the rejection. No post-window probes or automatic extra retries occur. There is no request timeout or machine-sleep prevention.
+Logs are `logs/booking-yyyyMMdd-HHmmss.jsonl` (opening in Sofia). Evidence includes request start/response times, status/server Date, session date/time/threshold, and each retry result. Request bodies, full URLs, auth/profile responses, tokens, and account/session IDs are never persisted. Only the known advance-booking rejection and BOOKED/WAITING status names are retained from booking bodies; other arbitrary server text is omitted. Only explicit BOOKED counts as success; ambiguous/waiting responses stop without duplicate POSTs. The diagnostic retries at 250 ms intervals for 4,000 ms (intentionally longer than the recurring scheduler's 1,500 ms since the user's 2026-11 change; up to 16 attempts), with a generic final deadline message. Its `armed` log entry still reports `retryDurationMs: 1500`, and the post-wake guard still refuses to start 1,500 ms or more after opening; per-attempt evidence preserves the rejection. No post-window probes or automatic extra retries occur. There is no request timeout or machine-sleep prevention.
 
 2026-11-03 diagnostic verification: direct TypeScript build and final no-emit check passed; Vitest passed all 11 tests in `tests/diagnostic.test.ts`, using mocked dependencies and no live services. The earlier no-tests baseline below describes the previous inspection, not current coverage. The user-authorized live run successfully booked 2026-11-17 06:30 on the first attempt: POST began at 2026-11-03 07:30:00.013 +02:00; HTTP 201 returned at 07:30:00.281, followed by explicit BOOKED confirmation at 07:30:00.283. The process exited 0 and is no longer running. The advance-booking rejection was not reproduced, so its cause remains undetermined. Restricted-network preparation initially failed with ENOTFOUND; network-enabled login/profile/schedule then succeeded and validated the unoccupied requested session at 07:26. Evidence is retained in `logs/booking-20261103-073000.jsonl`. This one successful observation does not establish that recurring bookings are fixed; recurring code was unchanged.
 
@@ -116,6 +119,19 @@ The staged test was read with `git show :src/scheduler.test.ts`. It contains eig
 These notes record the initial handoff, not a permanent claim about future Git status. Always inspect the current working tree and actual test files.
 
 ## Change log
+
+### 2026-11-18 — Tests for 4,000 ms diagnostic retries and recurring timing
+
+- User confirmed the `src/diagnostic.ts` change to `maxDurationMs: 4000` is intentional, and that winter and summer both attempt at 19:00/19:30. Updated `tests/diagnostic.test.ts` to expect 16 attempts at 0–3,750 ms. Added `tests/core.test.ts` (mocked `utils.js`, no env/live services) covering both seasons' 18:55/19:25 preparation and 19:00/19:30 attempts, the 14-day booking date, passed attempt time, skipped date, and weekend sleep. Tests only; no source or architectural change.
+- Validation (Linux scratch copy, same reason as below): `tsc --noEmit` passed; Vitest 28/28 passed across 3 files.
+- Remaining: the diagnostic's `armed` log still says `retryDurationMs: 1500`, which no longer matches the 4,000 ms window.
+
+### 2026-11-18 — Date ranges in skip-dates.txt
+
+- Added `src/skip-dates.ts` with `parseSkipEntry()`/`skipEntryMatches()`; `src/index.ts` and `src/diagnose-booking.ts` now use it instead of exact string equality. Single-date lines behave as before. Inclusive ranges (`dd-MM-yyyy..dd-MM-yyyy` or `... to ...`) are supported by comparison, not expansion. Invalid lines warn and never match. Documented syntax in `skip-dates.txt` comments (CRLF preserved; user's pending `26-11-2026` entry kept).
+- Why: user wanted to skip spans (e.g. holidays) without listing each day. Weekend days inside ranges need no processing because the scheduler never computes booking dates on weekends.
+- Validation: the checkout's `node_modules` contains Windows-native TypeScript/Rollup binaries, so checks ran in a Linux scratch copy after `npm ci`. `tsc --noEmit` passed. Vitest: 12/12 new skip-date tests passed; 2 of 11 diagnostic tests failed ("preserves local opening and retry bounds", both seasons: expected 6 attempts, got 16). That failure comes from the user's pre-existing unstaged `src/diagnostic.ts` change raising `maxDurationMs` from 1500 to 4000, not from this task; left untouched. No live services, scheduler, or bookings run.
+- Limitations: warnings for invalid lines repeat every weekday cycle; no architectural change beyond the new pure module.
 
 ### 2026-11-03 — One-off booking evidence capture
 
