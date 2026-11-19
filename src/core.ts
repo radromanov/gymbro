@@ -97,15 +97,16 @@ export async function runBookingCycle(
 
     log(
         `Booking date ${bookingDate}; slots ${BOOKING_SLOTS.join(", ")}. ` +
-            `skip-dates.txt is checked before preparing and before booking each slot.`,
+            `skip-dates.txt is checked when preparing each slot.`,
     );
 
     // Select the attempt schedule using the current Sofia DST status.
     const attemptTimeIdx = now.isInDST ? 1 : 0;
     const attemptedSlots: string[] = [];
 
-    // Checked late (not at midnight) so same-day edits to skip-dates.txt
-    // apply, and the push arrives at a sensible hour.
+    // Checked at preparation time (not at midnight, and not in the
+    // timing-critical moment before booking) so same-day edits apply and the
+    // push arrives at a sensible hour.
     const checkSkip = async (slotTime: string): Promise<"ok" | "skip" | "error"> => {
         try {
             if (!(await deps.isSkipped(bookingDate))) return "ok";
@@ -204,13 +205,6 @@ export async function runBookingCycle(
         if (now.toMillis() < target.toMillis()) {
             await sleep(target.toMillis() - now.toMillis());
         }
-
-        // Recheck in case skip-dates.txt changed during preparation.
-        const beforeBooking = await checkSkip(slotTime);
-        if (beforeBooking === "skip") {
-            return { kind: "skipped", bookingDate, attemptedSlots };
-        }
-        if (beforeBooking === "error") continue;
 
         // This is the only point where the actual booking is triggered.
         attemptedSlots.push(slotTime);

@@ -64,7 +64,7 @@ Read `AGENTS.md` first. Every coherent project change must update this file in t
 
 1. Importing `src/index.ts` creates an `NtfyVendor` and invokes `scheduler()`. It loops through `runBookingCycle()` and then sleeps until the next Sofia midnight for processed or skipped cycles. Weekend cycles already sleep until Monday and loop immediately afterward.
 2. The cycle converts the injected clock to `Europe/Sofia`. Saturday/Sunday cycles sleep until Monday 00:00 without preparation or booking. This check uses the current day. With a 14-day horizon the intended booking date has the same weekday.
-3. The cycle computes the booking date as Sofia start-of-day plus 14 **calendar days**, formatted `dd-MM-yyyy`, and logs it. The skip file is **not** read at midnight: each slot checks it right before preparation (18:55 / 19:25) and again right before booking. A match logs, sends `Booking Skipped` at `default` priority, skips all remaining slots, and returns `skipped` (with any already attempted slots); the outer scheduler sleeps until tomorrow. An unreadable skip file sends `Booking Error`, does not book that slot, and the next slot checks again.
+3. The cycle computes the booking date as Sofia start-of-day plus 14 **calendar days**, formatted `dd-MM-yyyy`, and logs it. The skip file is **not** read at midnight: each slot checks it once, right before preparation (18:55 / 19:25); it is not read in the timing-critical moment before booking, so an edit made after a slot's preparation applies from the next slot. A match logs, sends `Booking Skipped` at `default` priority, skips all remaining slots, and returns `skipped` (with any already attempted slots); the outer scheduler sleeps until tomorrow. An unreadable skip file sends `Booking Error`, does not book that slot, and the next slot checks again.
 4. Booking slots are `18:00` and `18:30`. Attempt times are currently **19:00 and 19:30 in both winter and summer**. The core selects a row based on the current Sofia DST status, but both rows currently contain identical times. Do not infer winter times from old tests or comments.
 5. Slots run sequentially. At each slot, a target at today's attempt time is calculated. If the time is already reached (`target <= now`), the slot is skipped with only a log line. Preparation is scheduled five minutes before the target (18:55 / 19:25). Starting within those five minutes prepares immediately.
 6. Preparation logs in and fetches the user ID (`authenticate()` in `index.ts`), fetches the schedule for the cycle's booking date, and selects the session. Login/profile are reused by a later slot of the same booking date when the login's `expiresIn` (assumed seconds) leaves more than 15 minutes; otherwise, or when `expiresIn` is missing, it logs in again. The schedule is always fetched fresh. Each API operation adds a 3-second sleep (logged before the sleep). The positionally selected session must have the booking date (`yyyy-MM-dd`) and `HH:mm` start time; otherwise preparation throws `SessionError`. Preparation returns a closure; it must not book anything itself. Any preparation exception is caught per slot: logged, `Booking Error` push (`<dd-MM-yyyy> <slot>: preparation failed: ...`), and the cycle continues with the next slot.
@@ -121,6 +121,11 @@ The staged test was read with `git show :src/scheduler.test.ts`. It contains eig
 These notes record the initial handoff, not a permanent claim about future Git status. Always inspect the current working tree and actual test files.
 
 ## Change log
+
+### 2026-11-19 — Skip file checked only at preparation
+
+- Removed the scheduler's skip recheck immediately before booking (user request): it put file I/O in front of the first POST. Each slot now reads `skip-dates.txt` once, before preparation. The diagnostic CLI is unchanged and still rechecks at opening.
+- Validation (Linux scratch copy): `tsc --noEmit` passed; Vitest 35/35 (replaced the post-preparation-skip test with one asserting checks only at 18:55/19:25). No live services; no architectural change.
 
 ### 2026-11-19 — Late skip checks, login reuse, single schedule date
 
