@@ -1,19 +1,16 @@
 import { DateTime } from "luxon";
 import { ScheduleError } from "../errors.js";
 import { ISchedule } from "./interfaces.js";
-import { hit, NEXT_SLOT_DAYS, sleep, TIME_ZONE } from "../utils.js";
+import { hit, sleep } from "../utils.js";
 import { loadEnv } from "../config.js";
 import { logger } from "../logger.js";
 
 const env = loadEnv();
 
-export const schedule = async (accessToken: string) => {
-    const tomorrow = DateTime.now()
-        .plus({ day: NEXT_SLOT_DAYS })
-        .setZone(TIME_ZONE)
-        .toISODate();
+/** @param date Booking date, `yyyy-MM-dd` (the caller's single source of truth). */
+export const schedule = async (accessToken: string, date: string) => {
     logger.info(
-        `Fetching schedule for ${DateTime.fromISO(tomorrow ?? "").toFormat("dd-MM-yyyy")}...`,
+        `Fetching schedule for ${DateTime.fromISO(date).toFormat("dd-MM-yyyy")}...`,
     );
     try {
 
@@ -23,7 +20,7 @@ export const schedule = async (accessToken: string) => {
                 include: "classBookings,classBookingWaitingList",
                 "filter[tenantId]": env.TENANT_ID,
                 "filter[locationId]": env.LOCATION_ID,
-                "filter[between]": `${tomorrow},${tomorrow}`,
+                "filter[between]": `${date},${date}`,
                 "filter[isSession]": "1",
                 internalAppend: "withoutLocations",
                 perPage: "-1",

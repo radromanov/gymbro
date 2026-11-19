@@ -49,13 +49,45 @@ describe("recurring booking cycle", () => {
         expect(result).toMatchObject({ kind: "processed", attemptedSlots: ["18:30"] });
     });
 
-    it("does not prepare or book a skipped date", async () => {
-        const f = fixture("2026-11-18T08:00:00+02:00");
-        vi.mocked(f.deps.isSkipped).mockResolvedValue(true);
+    it("checks skips at preparation time, not midnight, and skips without preparing", async () => {
+        const f = fixture("2026-11-18T00:00:00+02:00");
+        const checkedAt: string[] = [];
+        let now = () => "";
+        vi.mocked(f.deps.isSkipped).mockImplementation(async () => { checkedAt.push(now()); return true; });
+        now = () => f.deps.now().setZone("Europe/Sofia").toFormat("HH:mm");
         const result = await runBookingCycle(f.deps);
+        expect(checkedAt).toEqual(["18:55"]);
         expect(f.deps.prepareBooking).not.toHaveBeenCalled();
-        expect(f.deps.notify).toHaveBeenCalledWith("Booking Skipped", "Booking for 02-12-2026 was skipped.");
-        expect(result).toEqual({ kind: "skipped", bookingDate: "02-12-2026" });
+        expect(f.deps.notify).toHaveBeenCalledWith("Booking Skipped", "Booking for 02-12-2026 was skipped.", "default");
+        expect(result).toEqual({ kind: "skipped", bookingDate: "02-12-2026", attemptedSlots: [] });
+    });
+
+    it("applies a skip added after the first slot was booked", async () => {
+        const f = fixture("2026-11-18T08:00:00+02:00");
+        // before-prepare and before-book checks for 18:00, then skipped at 18:30.
+        vi.mocked(f.deps.isSkipped).mockResolvedValueOnce(false).mockResolvedValueOnce(false).mockResolvedValue(true);
+        const result = await runBookingCycle(f.deps);
+        expect(f.attempted).toEqual(["18:00@19:00:00"]);
+        expect(f.deps.prepareBooking).toHaveBeenCalledTimes(1);
+        expect(result).toEqual({ kind: "skipped", bookingDate: "02-12-2026", attemptedSlots: ["18:00"] });
+    });
+
+    it("rechecks skips after preparation and does not book", async () => {
+        const f = fixture("2026-11-18T08:00:00+02:00");
+        vi.mocked(f.deps.isSkipped).mockResolvedValueOnce(false).mockResolvedValue(true);
+        const result = await runBookingCycle(f.deps);
+        expect(f.deps.prepareBooking).toHaveBeenCalledTimes(1);
+        expect(f.attempted).toEqual([]);
+        expect(result.kind).toBe("skipped");
+    });
+
+    it("does not book a slot when skip-dates.txt cannot be read, then tries the next slot", async () => {
+        const f = fixture("2026-11-18T08:00:00+02:00");
+        vi.mocked(f.deps.isSkipped).mockRejectedValueOnce(new Error("ENOENT")).mockResolvedValue(false);
+        const result = await runBookingCycle(f.deps);
+        expect(f.deps.notify).toHaveBeenCalledWith("Booking Error", "02-12-2026 18:00: could not read skip-dates.txt (ENOENT); not booked.");
+        expect(f.attempted).toEqual(["18:30@19:30:00"]);
+        expect(result).toMatchObject({ kind: "processed", attemptedSlots: ["18:30"] });
     });
 
     it("sleeps through the weekend without checking skips", async () => {

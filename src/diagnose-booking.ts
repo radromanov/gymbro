@@ -60,7 +60,7 @@ try {
             if (typeof user.accessToken !== "string") throw new Error("Login returned no access token");
             const me = await API.GetMe(user.accessToken);
             if (typeof me.id !== "number") throw new Error("Profile returned no user ID");
-            const schedule = await API.GetSchedule(user.accessToken);
+            const schedule = await API.GetSchedule(user.accessToken, date);
             const session = getSession(schedule, slot);
             const validDate = (value: unknown) => typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : "invalid";
             const validTime = (value: unknown) => typeof value === "string" && /^\d{2}:\d{2}(:\d{2})?$/.test(value) ? value : "invalid";

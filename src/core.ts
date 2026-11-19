@@ -33,13 +33,19 @@ export interface SchedulerDependencies {
         bookingDate: string,
     ) => Promise<() => Promise<BookingResult>>;
 
-    notify: (title: string, message: string) => Promise<void>;
+    notify: (
+        title: string,
+        message: string,
+        priority?: NotificationPriority,
+    ) => Promise<void>;
     log?: (message: string) => void;
 }
 
+export type NotificationPriority = "low" | "default" | "high";
+
 export type CycleResult =
     | { kind: "weekend"; nextRunAt: DateTime }
-    | { kind: "skipped"; bookingDate: string }
+    | { kind: "skipped"; bookingDate: string; attemptedSlots: string[] }
     | { kind: "processed"; bookingDate: string; attemptedSlots: string[] };
 
 export interface RetryOptions {
@@ -89,22 +95,39 @@ export async function runBookingCycle(
         .plus({ days: NEXT_SLOT_DAYS })
         .toFormat("dd-MM-yyyy");
 
-    log(`Booking date ${bookingDate}; slots ${BOOKING_SLOTS.join(", ")}.`);
-
-    if (await deps.isSkipped(bookingDate)) {
-        log(`Booking date ${bookingDate} is in skip-dates.txt; skipping.`);
-
-        await deps.notify(
-            "Booking Skipped",
-            `Booking for ${bookingDate} was skipped.`,
-        );
-
-        return { kind: "skipped", bookingDate };
-    }
+    log(
+        `Booking date ${bookingDate}; slots ${BOOKING_SLOTS.join(", ")}. ` +
+            `skip-dates.txt is checked before preparing and before booking each slot.`,
+    );
 
     // Select the attempt schedule using the current Sofia DST status.
     const attemptTimeIdx = now.isInDST ? 1 : 0;
     const attemptedSlots: string[] = [];
+
+    // Checked late (not at midnight) so same-day edits to skip-dates.txt
+    // apply, and the push arrives at a sensible hour.
+    const checkSkip = async (slotTime: string): Promise<"ok" | "skip" | "error"> => {
+        try {
+            if (!(await deps.isSkipped(bookingDate))) return "ok";
+        } catch (error) {
+            const message =
+                error instanceof Error ? error.message : String(error);
+            log(`Slot ${slotTime}: could not read skip-dates.txt: ${message}; not booking.`);
+            await deps.notify(
+                "Booking Error",
+                `${bookingDate} ${slotTime}: could not read skip-dates.txt (${message}); not booked.`,
+            );
+            return "error";
+        }
+
+        log(`Booking date ${bookingDate} is in skip-dates.txt; skipping remaining slots.`);
+        await deps.notify(
+            "Booking Skipped",
+            `Booking for ${bookingDate} was skipped.`,
+            "default",
+        );
+        return "skip";
+    };
 
     for (let i = 0; i < BOOKING_SLOTS.length; i++) {
         const slotTime = BOOKING_SLOTS[i];
@@ -134,6 +157,12 @@ export async function runBookingCycle(
         if (now.toMillis() < prepareAt.toMillis()) {
             await sleep(prepareAt.toMillis() - now.toMillis());
         }
+
+        const beforePrepare = await checkSkip(slotTime);
+        if (beforePrepare === "skip") {
+            return { kind: "skipped", bookingDate, attemptedSlots };
+        }
+        if (beforePrepare === "error") continue;
 
         // Preparation may take time; it must not itself book the session.
         // A failed preparation (login, schedule, wrong session) must not stop
@@ -175,6 +204,13 @@ export async function runBookingCycle(
         if (now.toMillis() < target.toMillis()) {
             await sleep(target.toMillis() - now.toMillis());
         }
+
+        // Recheck in case skip-dates.txt changed during preparation.
+        const beforeBooking = await checkSkip(slotTime);
+        if (beforeBooking === "skip") {
+            return { kind: "skipped", bookingDate, attemptedSlots };
+        }
+        if (beforeBooking === "error") continue;
 
         // This is the only point where the actual booking is triggered.
         attemptedSlots.push(slotTime);

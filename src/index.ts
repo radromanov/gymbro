@@ -21,18 +21,47 @@ import { logger } from "./logger.js";
 
 const notif = new NtfyVendor();
 
+// Login/profile from the first slot, reused by later slots of the same
+// booking date while the token stays valid well past the booking attempt.
+const TOKEN_MARGIN_MS = 15 * 60 * 1000;
+let auth:
+    | { bookingDate: string; accessToken: string; userId: number; expiresAt: number }
+    | undefined;
+
+async function authenticate(bookingDate: string) {
+    if (
+        auth &&
+        auth.bookingDate === bookingDate &&
+        auth.expiresAt - Date.now() > TOKEN_MARGIN_MS
+    ) {
+        logger.info("Reusing login from earlier slot.");
+        return auth;
+    }
+
+    auth = undefined;
+    const user = await API.Login();
+    const me = await API.GetMe(user.accessToken);
+    // Unknown lifetime: use once, never cache.
+    const expiresAt =
+        typeof user.expiresIn === "number" && user.expiresIn > 0
+            ? Date.now() + user.expiresIn * 1000
+            : 0;
+    const fresh = { bookingDate, accessToken: user.accessToken, userId: me.id, expiresAt };
+    if (expiresAt) auth = fresh;
+    return fresh;
+}
+
 async function prepareBooking(
     slotTime: string,
     bookingDate: string,
 ): Promise<() => Promise<BookingResult>> {
     const label = `${bookingDate} ${slotTime}`;
-    const user = await API.Login();
-    const me = await API.GetMe(user.accessToken);
-    const schedule = await API.GetSchedule(user.accessToken);
+    const expectedDate = DateTime.fromFormat(bookingDate, "dd-MM-yyyy").toISODate()!;
+    const { accessToken, userId } = await authenticate(bookingDate);
+    const schedule = await API.GetSchedule(accessToken, expectedDate);
     const session = getSession(schedule, slotTime);
 
     // getSession() picks by position; confirm it is really the requested class.
-    const expectedDate = DateTime.fromFormat(bookingDate, "dd-MM-yyyy").toISODate();
     if (
         !session ||
         session.date !== expectedDate ||
@@ -49,11 +78,7 @@ async function prepareBooking(
     return async () => {
         const result = await retryBooking(
             async (): Promise<BookingResult> => {
-                const bookData = await API.Book(
-                    user.accessToken,
-                    session,
-                    me.id,
-                );
+                const bookData = await API.Book(accessToken, session, userId);
 
                 if ("message" in bookData) {
                     // Rejection (e.g. booking window not open yet): retry.
@@ -119,7 +144,8 @@ async function scheduler(): Promise<never> {
                     skipEntryMatches(line, bookingDate, logger.warn),
                 ),
             prepareBooking,
-            notify: (title, message) => notif.send(title, message),
+            notify: (title, message, priority) =>
+                notif.send(title, message, priority),
             log: logger.info,
         });
 
@@ -128,14 +154,13 @@ async function scheduler(): Promise<never> {
             continue;
         }
 
-        if (result.kind === "processed") {
-            const slots = result.attemptedSlots.length
-                ? result.attemptedSlots.join(", ")
-                : "none";
-            logger.info(
-                `Cycle done for ${result.bookingDate}; slots attempted: ${slots}.`,
-            );
-        }
+        const slots = result.attemptedSlots.length
+            ? result.attemptedSlots.join(", ")
+            : "none";
+        logger.info(
+            `Cycle done for ${result.bookingDate}` +
+                `${result.kind === "skipped" ? " (skipped)" : ""}; slots attempted: ${slots}.`,
+        );
 
         // Processed and skipped cycles both resume tomorrow.
         await sleepUntilTomorrow(

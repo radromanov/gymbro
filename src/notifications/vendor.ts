@@ -3,13 +3,19 @@ export enum Vendors {
     None
 };
 
+export type Priority = "low" | "default" | "high";
+
 export interface IVendor {
     name: Vendors;
-    send(title: string, message: string): Promise<void>;
+    send(title: string, message: string, priority?: Priority): Promise<void>;
 }
 
 export abstract class Vendor implements IVendor {
     abstract readonly name: Vendors;
 
-    abstract send(title: string, message: string): Promise<void>;
+    abstract send(
+        title: string,
+        message: string,
+        priority?: Priority,
+    ): Promise<void>;
 }
