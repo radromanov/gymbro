@@ -12,6 +12,10 @@ const ATTEMPT_TIMES = [
 export const PREPARE_AHEAD_MS = 5 * 60 * 1000;
 export const RETRY_INTERVAL_MS = 250;
 export const RETRY_DURATION_MS = 4_000;
+/** Open a keep-alive connection this long before the booking time. */
+export const WARMUP_LEAD_MS = 2_000;
+/** Busy-wait the final stretch; setTimeout can wake up to ~16 ms late on Windows. */
+export const SPIN_MS = 30;
 
 export interface BookingResult {
     success: boolean;
@@ -20,6 +24,14 @@ export interface BookingResult {
     /** `false` stops retrying immediately (e.g. waiting list, unknown status). Defaults to retryable. */
     retryable?: boolean;
 }
+
+/**
+ * The prepared booking attempt. `warmUp` (optional) is started shortly before
+ * the booking time so the attempt reuses an open connection.
+ */
+export type PreparedBooking = (() => Promise<BookingResult>) & {
+    warmUp?: () => Promise<void>;
+};
 
 export interface SchedulerDependencies {
     now: () => DateTime;
@@ -31,7 +43,10 @@ export interface SchedulerDependencies {
     prepareBooking: (
         slotTime: string,
         bookingDate: string,
-    ) => Promise<() => Promise<BookingResult>>;
+    ) => Promise<PreparedBooking>;
+
+    /** Resolves as close to `targetMs` as possible. Defaults to a plain sleep. */
+    waitUntil?: (targetMs: number) => Promise<void>;
 
     notify: (
         title: string,
@@ -69,6 +84,25 @@ function atTime(day: DateTime, time: string): DateTime {
 
 function nextMidnight(now: DateTime): DateTime {
     return now.plus({ days: 1 }).startOf("day");
+}
+
+/**
+ * Sleeps until `spinMs` before the target, then busy-waits to the exact
+ * millisecond. Never resolves before `targetMs`.
+ */
+export async function waitUntil(
+    targetMs: number,
+    nowMs: () => number,
+    sleep: (ms: number) => Promise<void>,
+    spinMs: number = SPIN_MS,
+): Promise<void> {
+    const remaining = targetMs - nowMs();
+    if (remaining > spinMs) {
+        await sleep(remaining - spinMs);
+    }
+    while (nowMs() < targetMs) {
+        // Busy-wait; nothing else needs the event loop at this moment.
+    }
 }
 
 export async function runBookingCycle(
@@ -169,7 +203,7 @@ export async function runBookingCycle(
         // A failed preparation (login, schedule, wrong session) must not stop
         // the scheduler or the next slot.
         log(`Slot ${slotTime}: preparing.`);
-        let attemptBooking: () => Promise<BookingResult>;
+        let attemptBooking: PreparedBooking;
         try {
             attemptBooking = await deps.prepareBooking(slotTime, bookingDate);
         } catch (error) {
@@ -201,18 +235,39 @@ export async function runBookingCycle(
             continue;
         }
 
-        // Wait until the precise attempt time.
-        if (now.toMillis() < target.toMillis()) {
-            await sleep(target.toMillis() - now.toMillis());
+        const wait =
+            deps.waitUntil ??
+            (async (targetMs: number) => {
+                const ms = targetMs - clock().toMillis();
+                if (ms > 0) await sleep(ms);
+            });
+
+        // Open a connection shortly before the booking time so the first
+        // request skips DNS/TCP/TLS. Not awaited: it must never delay booking.
+        let warmUp = "not used";
+        if (attemptBooking.warmUp) {
+            await wait(target.toMillis() - WARMUP_LEAD_MS);
+            const warmStart = clock().toMillis();
+            warmUp = "still pending at booking time";
+            attemptBooking.warmUp().then(
+                () => { warmUp = `done in ${clock().toMillis() - warmStart} ms`; },
+                (error) => { warmUp = `failed: ${error instanceof Error ? error.message : String(error)}`; },
+            );
         }
 
-        // This is the only point where the actual booking is triggered.
-        attemptedSlots.push(slotTime);
+        await wait(target.toMillis());
 
-        log(`Slot ${slotTime}: booking.`);
+        // This is the only point where the actual booking is triggered.
+        // Nothing (not even logging) runs between the wait and the request.
+        const firedAt = clock();
+        attemptedSlots.push(slotTime);
 
         try {
             const result = await attemptBooking();
+            log(
+                `Slot ${slotTime}: fired at ${firedAt.setZone(TIME_ZONE).toFormat("HH:mm:ss.SSS")} ` +
+                    `(+${firedAt.toMillis() - target.toMillis()} ms after target; warm-up ${warmUp}).`,
+            );
             log(`Slot ${slotTime}: ${result.title}: ${result.message}`);
             await deps.notify(result.title, result.message);
         } catch (error) {
@@ -259,6 +314,8 @@ export async function retryBooking(
             await options.sleep(waitMs);
         }
 
+        const sentAt = options.nowMs();
+
         if (options.nowMs() - startedAt >= maxDurationMs) {
             return {
                 success: false,
@@ -271,21 +328,21 @@ export async function retryBooking(
 
         attempt++;
 
-        log(`Booking attempt #${attempt}`);
-
+        // Log only after the response, so nothing delays sending.
         const result = await book();
+        const timing = `(+${sentAt - startedAt} ms, ${options.nowMs() - sentAt} ms round trip)`;
 
         if (result.success) {
-            log(`Attempt #${attempt} succeeded.`);
+            log(`Attempt #${attempt} ${timing} succeeded.`);
             return result;
         }
 
         if (result.retryable === false) {
-            log(`Attempt #${attempt} not retryable: ${result.message}`);
+            log(`Attempt #${attempt} ${timing} not retryable: ${result.message}`);
             return result;
         }
 
         lastMessage = result.message;
-        log(`Attempt #${attempt} rejected: ${result.message}`);
+        log(`Attempt #${attempt} ${timing} rejected: ${result.message}`);
     }
 }

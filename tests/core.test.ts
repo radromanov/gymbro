@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { DateTime } from "luxon";
 
 vi.mock("../src/utils.js", () => ({ TIME_ZONE: "Europe/Sofia", NEXT_SLOT_DAYS: 14 }));
-import { PREPARE_AHEAD_MS, retryBooking, runBookingCycle, type SchedulerDependencies } from "../src/core.js";
+import { PREPARE_AHEAD_MS, retryBooking, runBookingCycle, waitUntil, type SchedulerDependencies } from "../src/core.js";
 
 function fixture(iso: string) {
     let clock = DateTime.fromISO(iso, { setZone: true });
@@ -136,7 +136,7 @@ describe("retryBooking", () => {
         const result = await retryBooking(book, c);
         expect(result.success).toBe(true);
         expect(book).toHaveBeenCalledTimes(2);
-        expect(c.log).toHaveBeenCalledWith("Attempt #2 succeeded.");
+        expect(c.log).toHaveBeenCalledWith("Attempt #2 (+250 ms, 0 ms round trip) succeeded.");
     });
 
     it("never retries a non-retryable result such as the waiting list", async () => {
@@ -145,5 +145,43 @@ describe("retryBooking", () => {
         const book = vi.fn(async () => waiting);
         expect(await retryBooking(book, c)).toBe(waiting);
         expect(book).toHaveBeenCalledTimes(1);
+    });
+});
+
+describe("precise timing", () => {
+    it("sleeps until the spin window, then busy-waits and never fires early", async () => {
+        let t = 0;
+        const nowMs = () => t++; // clock advances 1 ms per read while spinning
+        const sleep = vi.fn(async (ms: number) => { t += ms + 7; }); // timer wakes 7 ms late
+        await waitUntil(10_000, nowMs, sleep, 30);
+        expect(sleep).toHaveBeenCalledWith(9_970);
+        expect(t - 1).toBeGreaterThanOrEqual(10_000);
+        expect(t - 1).toBeLessThanOrEqual(10_001);
+    });
+
+    it("starts warm-up 2 s before booking and fires exactly at the target", async () => {
+        let clock = DateTime.fromISO("2026-11-18T08:00:00+02:00", { setZone: true });
+        const at = () => clock.setZone("Europe/Sofia").toFormat("HH:mm:ss.SSS");
+        const events: string[] = [];
+        const deps: SchedulerDependencies = {
+            now: () => clock,
+            sleep: vi.fn(async (ms) => { clock = clock.plus({ milliseconds: ms }); }),
+            isSkipped: vi.fn(async () => false),
+            prepareBooking: vi.fn(async (slot: string) =>
+                Object.assign(
+                    async () => { events.push(`book ${slot} ${at()}`); return { success: true, title: "Booked", message: "ok" }; },
+                    { warmUp: async () => { events.push(`warm ${slot} ${at()}`); } },
+                ),
+            ),
+            notify: vi.fn(async () => {}),
+            log: vi.fn(),
+        };
+        await runBookingCycle(deps);
+        expect(events).toEqual([
+            "warm 18:00 18:59:58.000", "book 18:00 19:00:00.000",
+            "warm 18:30 19:29:58.000", "book 18:30 19:30:00.000",
+        ]);
+        // Warm-up duration depends on the fake sleep advancing the clock eagerly; only the format matters here.
+        expect(deps.log).toHaveBeenCalledWith(expect.stringMatching(/^Slot 18:00: fired at 19:00:00\.000 \(\+0 ms after target; warm-up done in \d+ ms\)\.$/));
     });
 });

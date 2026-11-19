@@ -2,6 +2,7 @@ import { DateTime } from "luxon";
 import { AppError, SessionError } from "./errors.js";
 import {
     processFileLineByLine,
+    hit,
     sleep,
     TIME_ZONE,
     getSession,
@@ -14,7 +15,9 @@ import {
     sleepUntilTomorrow,
     RETRY_DURATION_MS,
     RETRY_INTERVAL_MS,
+    waitUntil,
     type BookingResult,
+    type PreparedBooking,
 } from "./core.js";
 import { skipEntryMatches } from "./skip-dates.js";
 import { logger } from "./logger.js";
@@ -54,7 +57,7 @@ async function authenticate(bookingDate: string) {
 async function prepareBooking(
     slotTime: string,
     bookingDate: string,
-): Promise<() => Promise<BookingResult>> {
+): Promise<PreparedBooking> {
     const label = `${bookingDate} ${slotTime}`;
     const expectedDate = DateTime.fromFormat(bookingDate, "dd-MM-yyyy").toISODate()!;
     const { accessToken, userId } = await authenticate(bookingDate);
@@ -75,7 +78,7 @@ async function prepareBooking(
 
     // This closure is not invoked until the scheduler reaches the
     // calculated attempt time.
-    return async () => {
+    const attempt = async () => {
         const result = await retryBooking(
             async (): Promise<BookingResult> => {
                 const bookData = await API.Book(accessToken, session, userId);
@@ -130,6 +133,16 @@ async function prepareBooking(
             ? result
             : { ...result, message: `${label}: ${result.message}` };
     };
+
+    // Harmless authenticated read to the same host, so the booking POST
+    // reuses an open keep-alive connection.
+    const warmUp = async () => {
+        await hit("/users/me", "GET", {
+            headers: [["Authorization", `Bearer ${accessToken}`]],
+        });
+    };
+
+    return Object.assign(attempt, { warmUp });
 }
 
 async function scheduler(): Promise<never> {
@@ -144,6 +157,7 @@ async function scheduler(): Promise<never> {
                     skipEntryMatches(line, bookingDate, logger.warn),
                 ),
             prepareBooking,
+            waitUntil: (targetMs) => waitUntil(targetMs, Date.now, sleep),
             notify: (title, message, priority) =>
                 notif.send(title, message, priority),
             log: logger.info,
