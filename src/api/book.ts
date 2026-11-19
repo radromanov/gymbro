@@ -1,6 +1,7 @@
 import { BookError } from "../errors.js";
 import { IBookResponse, IBookResponseTaken, ISlot } from "./interfaces.js";
 import { hit } from "../utils.js";
+import { logger } from "../logger.js";
 
 export const book = async (
     accessToken: string,
@@ -22,7 +23,7 @@ export const book = async (
 
         return data;
     } catch (e) {
-        console.log(e);
+        logger.error("Booking request failed:", e);
         throw new BookError(`unable to book classDateId=${session.id}`);
     }
 };

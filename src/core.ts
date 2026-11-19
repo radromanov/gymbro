@@ -1,5 +1,6 @@
 import { DateTime } from "luxon";
 import { NEXT_SLOT_DAYS, TIME_ZONE } from "./utils.js";
+import { logger } from "./logger.js";
 
 export const BOOKING_SLOTS = ["18:00", "18:30"] as const;
 
@@ -9,11 +10,15 @@ const ATTEMPT_TIMES = [
 ] as const;
 
 export const PREPARE_AHEAD_MS = 5 * 60 * 1000;
+export const RETRY_INTERVAL_MS = 250;
+export const RETRY_DURATION_MS = 4_000;
 
 export interface BookingResult {
     success: boolean;
     title: string;
     message: string;
+    /** `false` stops retrying immediately (e.g. waiting list, unknown status). Defaults to retryable. */
+    retryable?: boolean;
 }
 
 export interface SchedulerDependencies {
@@ -63,7 +68,7 @@ function nextMidnight(now: DateTime): DateTime {
 export async function runBookingCycle(
     deps: SchedulerDependencies,
 ): Promise<CycleResult> {
-    const { now: clock, sleep, log = console.log } = deps;
+    const { now: clock, sleep, log = logger.info } = deps;
 
     let now = clock().setZone(TIME_ZONE);
 
@@ -72,7 +77,7 @@ export async function runBookingCycle(
         const daysUntilMonday = 8 - now.weekday;
         const nextMonday = now.plus({ days: daysUntilMonday }).startOf("day");
 
-        log(`Weekend. Sleeping until ${nextMonday.toISO()}`);
+        log(`Weekend. Sleeping until ${nextMonday.toFormat("yyyy-MM-dd HH:mm")}.`);
         await sleep(nextMonday.toMillis() - now.toMillis());
 
         return { kind: "weekend", nextRunAt: nextMonday };
@@ -84,8 +89,10 @@ export async function runBookingCycle(
         .plus({ days: NEXT_SLOT_DAYS })
         .toFormat("dd-MM-yyyy");
 
+    log(`Booking date ${bookingDate}; slots ${BOOKING_SLOTS.join(", ")}.`);
+
     if (await deps.isSkipped(bookingDate)) {
-        log(`Skipping booking date ${bookingDate}`);
+        log(`Booking date ${bookingDate} is in skip-dates.txt; skipping.`);
 
         await deps.notify(
             "Booking Skipped",
@@ -109,7 +116,7 @@ export async function runBookingCycle(
         // Never attempt a slot whose opening time has passed.
         if (target.toMillis() <= now.toMillis()) {
             log(
-                `Skipping ${slotTime}; attempt time ${attemptTime} has passed.`,
+                `Slot ${slotTime}: booking time ${attemptTime} has passed; not attempting.`,
             );
             continue;
         }
@@ -117,8 +124,8 @@ export async function runBookingCycle(
         const prepareAt = target.minus({ milliseconds: PREPARE_AHEAD_MS });
 
         log(
-            `Slot ${slotTime}: prepare at ${prepareAt.toFormat("yyyy-MM-dd HH:mm:ss ZZZZ")}; ` +
-                `attempt at ${target.toFormat("yyyy-MM-dd HH:mm:ss ZZZZ")}`,
+            `Slot ${slotTime}: waiting; prepare at ${prepareAt.toFormat("HH:mm:ss")}, ` +
+                `book at ${target.toFormat("HH:mm:ss")} (${target.toFormat("ZZZZ")}).`,
         );
 
         // Wait until five minutes before the attempt time.
@@ -129,7 +136,22 @@ export async function runBookingCycle(
         }
 
         // Preparation may take time; it must not itself book the session.
-        const attemptBooking = await deps.prepareBooking(slotTime, bookingDate);
+        // A failed preparation (login, schedule, wrong session) must not stop
+        // the scheduler or the next slot.
+        log(`Slot ${slotTime}: preparing.`);
+        let attemptBooking: () => Promise<BookingResult>;
+        try {
+            attemptBooking = await deps.prepareBooking(slotTime, bookingDate);
+        } catch (error) {
+            const message =
+                error instanceof Error ? error.message : String(error);
+            log(`Slot ${slotTime}: preparation failed: ${message}`);
+            await deps.notify(
+                "Booking Error",
+                `${bookingDate} ${slotTime}: preparation failed: ${message}`,
+            );
+            continue;
+        }
 
         // Re-read the clock after preparation, rather than trusting an
         // earlier timestamp.
@@ -140,10 +162,11 @@ export async function runBookingCycle(
                 success: false,
                 title: "Booking Missed",
                 message:
-                    `Missed booking window for ${bookingDate}, ${slotTime}. ` +
-                    `Preparation finished after ${attemptTime}.`,
+                    `${bookingDate} ${slotTime}: preparation finished after ` +
+                    `${attemptTime}; not attempted.`,
             };
 
+            log(`Slot ${slotTime}: ${result.title}: ${result.message}`);
             await deps.notify(result.title, result.message);
             continue;
         }
@@ -156,18 +179,20 @@ export async function runBookingCycle(
         // This is the only point where the actual booking is triggered.
         attemptedSlots.push(slotTime);
 
-        log(
-            `Attempting ${slotTime} at ${clock().setZone(TIME_ZONE).toFormat("HH:mm:ss.SSS")}`,
-        );
+        log(`Slot ${slotTime}: booking.`);
 
         try {
             const result = await attemptBooking();
+            log(`Slot ${slotTime}: ${result.title}: ${result.message}`);
             await deps.notify(result.title, result.message);
         } catch (error) {
             const message =
                 error instanceof Error ? error.message : String(error);
-            log(`Booking ${slotTime} threw: ${message}`);
-            await deps.notify("Booking Error", message);
+            log(`Slot ${slotTime}: booking threw: ${message}`);
+            await deps.notify(
+                "Booking Error",
+                `${bookingDate} ${slotTime}: ${message}`,
+            );
         }
     }
 
@@ -177,8 +202,10 @@ export async function runBookingCycle(
 export async function sleepUntilTomorrow(
     now: DateTime,
     sleep: (ms: number) => Promise<void>,
+    log: (message: string) => void = logger.info,
 ): Promise<void> {
     const tomorrow = nextMidnight(now.setZone(TIME_ZONE));
+    log(`Sleeping until ${tomorrow.toFormat("yyyy-MM-dd HH:mm")}.`);
     await sleep(tomorrow.toMillis() - now.toMillis());
 }
 
@@ -186,12 +213,13 @@ export async function retryBooking(
     book: () => Promise<BookingResult>,
     options: RetryOptions,
 ): Promise<BookingResult> {
-    const intervalMs = options.intervalMs ?? 250;
-    const maxDurationMs = options.maxDurationMs ?? 1_500;
+    const intervalMs = options.intervalMs ?? RETRY_INTERVAL_MS;
+    const maxDurationMs = options.maxDurationMs ?? RETRY_DURATION_MS;
     const log = options.log ?? (() => {});
 
     const startedAt = options.nowMs();
     let attempt = 0;
+    let lastMessage = "none";
 
     while (true) {
         const nextAttemptAt = startedAt + attempt * intervalMs;
@@ -205,7 +233,9 @@ export async function retryBooking(
             return {
                 success: false,
                 title: "Session Not Booked",
-                message: `Booking was not accepted within ${maxDurationMs / 1000} seconds.`,
+                message:
+                    `No success within ${maxDurationMs / 1000} s ` +
+                    `(${attempt} attempts). Last response: ${lastMessage}`,
             };
         }
 
@@ -216,9 +246,16 @@ export async function retryBooking(
         const result = await book();
 
         if (result.success) {
+            log(`Attempt #${attempt} succeeded.`);
             return result;
         }
 
+        if (result.retryable === false) {
+            log(`Attempt #${attempt} not retryable: ${result.message}`);
+            return result;
+        }
+
+        lastMessage = result.message;
         log(`Attempt #${attempt} rejected: ${result.message}`);
     }
 }

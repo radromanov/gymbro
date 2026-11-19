@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { DateTime } from "luxon";
 
 vi.mock("../src/utils.js", () => ({ TIME_ZONE: "Europe/Sofia", NEXT_SLOT_DAYS: 14 }));
-import { PREPARE_AHEAD_MS, runBookingCycle, type SchedulerDependencies } from "../src/core.js";
+import { PREPARE_AHEAD_MS, retryBooking, runBookingCycle, type SchedulerDependencies } from "../src/core.js";
 
 function fixture(iso: string) {
     let clock = DateTime.fromISO(iso, { setZone: true });
@@ -64,5 +64,50 @@ describe("recurring booking cycle", () => {
         expect(f.deps.isSkipped).not.toHaveBeenCalled();
         expect(result.kind).toBe("weekend");
         expect(f.deps.sleep).toHaveBeenCalledWith(40 * 60 * 60 * 1000); // until Monday 00:00
+    });
+
+    it("keeps going after a failed preparation and notifies", async () => {
+        const f = fixture("2026-11-18T08:00:00+02:00");
+        const original = f.deps.prepareBooking;
+        vi.mocked(f.deps.prepareBooking).mockImplementationOnce(async () => { throw new Error("schedule returned 2026-12-02 17:30:00 instead of 2026-12-02 18:00"); });
+        const result = await runBookingCycle(f.deps);
+        expect(original).toHaveBeenCalledTimes(2);
+        expect(f.deps.notify).toHaveBeenCalledWith("Booking Error", "02-12-2026 18:00: preparation failed: schedule returned 2026-12-02 17:30:00 instead of 2026-12-02 18:00");
+        expect(f.attempted).toEqual(["18:30@19:30:00"]);
+        expect(result).toMatchObject({ kind: "processed", attemptedSlots: ["18:30"] });
+    });
+});
+
+describe("retryBooking", () => {
+    function clock() {
+        let t = 0;
+        return { nowMs: () => t, sleep: vi.fn(async (ms: number) => { t += ms; }), log: vi.fn() };
+    }
+
+    it("retries rejections for 4 s at 250 ms and reports the last response", async () => {
+        const c = clock();
+        const book = vi.fn(async () => ({ success: false, title: "Session Not Booked", message: "You cannot book this far in advance" }));
+        const result = await retryBooking(book, c);
+        expect(book).toHaveBeenCalledTimes(16);
+        expect(result).toEqual({ success: false, title: "Session Not Booked", message: "No success within 4 s (16 attempts). Last response: You cannot book this far in advance" });
+    });
+
+    it("logs success and stops", async () => {
+        const c = clock();
+        const book = vi.fn()
+            .mockResolvedValueOnce({ success: false, title: "x", message: "not yet" })
+            .mockResolvedValueOnce({ success: true, title: "Session Booked", message: "Booked." });
+        const result = await retryBooking(book, c);
+        expect(result.success).toBe(true);
+        expect(book).toHaveBeenCalledTimes(2);
+        expect(c.log).toHaveBeenCalledWith("Attempt #2 succeeded.");
+    });
+
+    it("never retries a non-retryable result such as the waiting list", async () => {
+        const c = clock();
+        const waiting = { success: false, retryable: false, title: "Waiting List", message: "placed on the waiting list" };
+        const book = vi.fn(async () => waiting);
+        expect(await retryBooking(book, c)).toBe(waiting);
+        expect(book).toHaveBeenCalledTimes(1);
     });
 });

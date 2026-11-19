@@ -1,5 +1,10 @@
 import { DateTime } from "luxon";
-import { retryBooking, type BookingResult } from "./core.js";
+import {
+    retryBooking,
+    RETRY_DURATION_MS,
+    RETRY_INTERVAL_MS,
+    type BookingResult,
+} from "./core.js";
 import { TIME_ZONE } from "./utils.js";
 
 export interface DiagnosticDependencies {
@@ -21,8 +26,8 @@ export async function runDiagnostic(
     }
     deps.log("armed", {
         opening: opening.toISO(),
-        retryDurationMs: 1500,
-        retryIntervalMs: 250,
+        retryDurationMs: RETRY_DURATION_MS,
+        retryIntervalMs: RETRY_INTERVAL_MS,
     });
     const prepareAt = opening.minus({ minutes: 5 });
     if (now().toMillis() < prepareAt.toMillis()) {
@@ -42,8 +47,8 @@ export async function runDiagnostic(
     const result = await retryBooking(attempt, {
         nowMs: () => now().toMillis(),
         sleep: deps.sleep,
-        intervalMs: 250,
-        maxDurationMs: 4000,
+        intervalMs: RETRY_INTERVAL_MS,
+        maxDurationMs: RETRY_DURATION_MS,
         log: (message) => deps.log("retry", { message }),
     });
     deps.log("result", { ...result });

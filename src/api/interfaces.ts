@@ -86,9 +86,11 @@ export type BookingResult =
         success: true;
         title: string;
         message: string;
+        retryable?: boolean;
       }
     | {
         success: false;
         title: string;
         message: string;
+        retryable?: boolean;
       };
